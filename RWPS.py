@@ -4,6 +4,7 @@ from sklearn.linear_model import (
     RANSACRegressor,
 )
 import json
+from pointcloud import PointCloud
 
 class RWPS:
     def __init__(self, config_file=None) -> None:
@@ -146,12 +147,125 @@ class RWPS:
         self.prev_unitnormal = unit_normal
         self.prev_mask = mask
         return mask, plane_model
+    
+    def get_segmentation_mask_from_plane_model(self, points_3d, plane_model):
 
+        normal = plane_model[:3]
+        d = plane_model[3]
+        normal_length = np.linalg.norm(normal)
+        unit_normal = normal / normal_length
+        height = d / normal_length
 
+        mask = self.get_water_mask_from_plane_model(points_3d, plane_model)
+        if self.prev_planemodel is not None:
+            prev_valid = self.validity_check(
+                self.prev_height, self.prev_unitnormal, height, unit_normal
+            )
+            init_valid = self.validity_check(
+                self.init_height, self.init_unitnormal, height, unit_normal
+            )
+
+            if prev_valid and not init_valid:
+                mask = self.get_water_mask_from_plane_model(
+                    points_3d, self.prev_planemodel
+                )
+
+            elif not prev_valid and not init_valid:
+                # if not prev_valid and not init_valid:
+                mask = self.get_water_mask_from_plane_model(
+                    points_3d, self.init_planemodel
+                )
+
+        return mask
+
+    def get_image_mask(xyz, cam_params, shape):
+        cx, cy = cam_params["cx"], cam_params["cy"]
+        fx, fy = cam_params["fx"], cam_params["fy"]
+        X_o, Y_o, Z_o = xyz[:, 0], xyz[:, 1], xyz[:, 2]
+        x = (fx * X_o / Z_o) + cx
+        y = (fy * Y_o / Z_o) + cy
+
+        mask = np.zeros(shape)
+        mask[y.astype(int), x.astype(int)] = 1
+        return mask
+
+    def validity_check(self, prev_height, prev_normal, current_height, current_normal):
+        if abs(prev_height - current_height) > self.validity_height_thr:
+            return False
+        if np.dot(prev_normal, current_normal) < np.cos(self.validity_angle_thr):
+            return False
+        return True
+
+    def get_pitch(self, normal_vec=None):
+        if normal_vec is None:
+            normal_vec = self.prev_unitnormal
+        normal_vec = normal_vec / np.linalg.norm(normal_vec)
+        [a, b, c] = normal_vec
+        pitch = np.arctan2(c, b)
+        return pitch
+
+    def get_roll(self, normal_vec=None):
+        if normal_vec is None:
+            normal_vec = self.prev_unitnormal
+        normal_vec = normal_vec / np.linalg.norm(normal_vec)
+        [a, b, c] = normal_vec
+        roll = np.arctan2(a, b)
+        return roll
+    
+    def get_water_mask_from_plane_model(self, points_3d, plane_model):
+        normal = plane_model[:3]
+        d = plane_model[3]
+        H, W = self.shape
+        normal_length = np.linalg.norm(normal)
+        unit_normal = normal / normal_length
+        height = d / normal_length
+        distances = unit_normal.dot(points_3d.T) + height
+        # distances = normal.dot(points_3d.T) + d
+        inlier_indices_1d = np.where(np.abs(distances) < self.distance_threshold)[0]
+        inlier_indices = np.unravel_index(inlier_indices_1d, (H, W))
+        mask = np.zeros((H, W))
+        mask[inlier_indices] = 1
+        return mask
+
+    def get_plane_model(self):
+        return self.prev_planemodel
+    
+    def get_horizon(self, normal_vec=None):
+        if normal_vec is None and self.prev_unitnormal is not None:
+            normal_vec = self.prev_unitnormal
+        elif normal_vec is None and self.prev_unitnormal is None:
+            print("No plane parameters.")
+            return None, None
+
+        [a, b, c] = normal_vec
+        fy = self.cam_params["fy"]
+        cx = self.cam_params["cx"]
+        cy = self.cam_params["cy"]
+
+        x0 = 0
+        xW = self.shape[1]
+
+        k = a * cx + b * cy - c * fy
+        y0 = (1 / b) * (k - a * x0)
+        yW = (1 / b) * (k - a * xW)
+
+        p1 = np.array([x0, y0])
+        p2 = np.array([xW, yW])
+
+        horizon_slope = (p2[1] - p1[1]) / (p2[0] - p1[0])
+        horizon_intercept = int(p1[1] - horizon_slope * p1[0])
+
+        horizon_point0 = np.array([x0, horizon_slope * x0 + horizon_intercept]).astype(
+            int
+        )
+        horizon_pointW = np.array([xW, horizon_slope * xW + horizon_intercept]).astype(
+            int
+        )
+        horizon_cutoff = min(horizon_point0[1], horizon_pointW[1]) - 50
+
+        return horizon_point0, horizon_pointW, horizon_cutoff
 
     
-
-
 
 def invalid_mask(p1, p2, shape):
     # Define the points
