@@ -11,7 +11,7 @@ from bev import calculate_bev_image
 
 dataset = "modd2"
 start_frame = 0
-save_video = True
+save_video = False
 show_horizon = False
 create_bev = False
 save_bev = False
@@ -24,7 +24,9 @@ src_dir = "/Users/johannesskaro/Documents/KYB 5.år/prosjektoppgave"
 
 if dataset == "modd2":
     #sequence = "kope81-00-00006800-00007095"
-    sequence = "kope81-00-00019370-00019710"
+    #sequence = "kope81-00-00019370-00019710" #cruise ship
+    #sequence = "kope75-00-00013780-00014195" #gummibåt
+    sequence = "kope75-00-00062200-00062500" #havn
     
 
     W, H = (1278, 958)
@@ -198,7 +200,7 @@ while curr_frame < num_frames - 1:
             f"Pitch: {np.round(np.rad2deg(pitch),2)}, Roll: {np.round(np.rad2deg(roll),2)}, P1: {horizon_point0}, P2: {horizon_pointW}"
         )
 
-    water_mask = rwps_mask_3d
+    water_mask = np.zeros_like(depth_img)
 
     # Run FastSAM segmentation
     if mode == "fusion":
@@ -251,14 +253,14 @@ while curr_frame < num_frames - 1:
 
 
     water_mask = np.logical_and(water_mask, mask_not_usvpartsL)
-    water_mask = ut.remove_obstacles_from_watermask(water_mask, gt_obstacles)
+    #water_mask = ut.remove_obstacles_from_watermask(water_mask, gt_obstacles)
     blue_water_mask = water_mask
 
     nonwater_mask = np.logical_not(water_mask)
     nonwater_contrastreduced = left_img.copy()
-    nonwater_contrastreduced[nonwater_mask] = (
-        nonwater_contrastreduced[nonwater_mask] // 2
-    ) + 128
+    #nonwater_contrastreduced[nonwater_mask] = (
+    #    nonwater_contrastreduced[nonwater_mask] // 2
+    #) + 128
 
     water_img = nonwater_contrastreduced.copy()
     water_img = ut.blend_image_with_mask(
