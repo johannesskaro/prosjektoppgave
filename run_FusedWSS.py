@@ -11,7 +11,7 @@ from bev import calculate_bev_image
 
 dataset = "modd2"
 start_frame = 0
-save_video = False
+save_video = True
 show_horizon = False
 create_bev = False
 save_bev = False
@@ -20,13 +20,14 @@ iou_threshold = 0.1
 fastsam_model_path = "weights/FastSAM-x.pt"
 device = "mps"
 dataset_dir = "/Users/johannesskaro/Documents/KYB 5.år/Datasets"
-src_dir = "/Users/johannesskaro/Documents/KYB 5.år/prosjektoppgave"
+src_dir = "/Users/johannesskaro/Documents/KYB 5.år/fusedWSS"
 
 if dataset == "modd2":
     #sequence = "kope81-00-00006800-00007095"
     #sequence = "kope81-00-00019370-00019710" #cruise ship
     #sequence = "kope75-00-00013780-00014195" #gummibåt
-    sequence = "kope75-00-00062200-00062500" #havn
+    #sequence = "kope75-00-00062200-00062500" #havn
+    sequence = "kope71-01-00014337-00014547"
     
 
     W, H = (1278, 958)
@@ -258,9 +259,9 @@ while curr_frame < num_frames - 1:
 
     nonwater_mask = np.logical_not(water_mask)
     nonwater_contrastreduced = left_img.copy()
-    #nonwater_contrastreduced[nonwater_mask] = (
-    #    nonwater_contrastreduced[nonwater_mask] // 2
-    #) + 128
+    nonwater_contrastreduced[nonwater_mask] = (
+        nonwater_contrastreduced[nonwater_mask] // 2
+    ) + 128
 
     water_img = nonwater_contrastreduced.copy()
     water_img = ut.blend_image_with_mask(
