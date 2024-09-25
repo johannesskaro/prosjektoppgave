@@ -50,10 +50,11 @@ class FastSAMSeg:
         Returns:
         - np.array: Mask result.
         """
-
+        mask = np.zeros((img.shape[0], img.shape[1]))
         point_results = self.model(img, points=points, labels=pointlabel, device=device, retina_masks=True)
         ann = point_results[0].cpu()
-        mask = np.array(ann[0].masks.data[0]) if ann[0].masks else np.zeros((img.shape[0], img.shape[1]))
+        if len(ann)>0:
+            mask = np.array(ann[0].masks.data[0]) if ann[0].masks else np.zeros((img.shape[0], img.shape[1]))
 
         return mask
     
