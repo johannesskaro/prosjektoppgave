@@ -5,9 +5,17 @@ import os
 from utilities import pohang_2_intrinsics_extrinsics, mods_2_intrinsics_extrinsics
 import utilities as ut
 import matplotlib.pyplot as plt
+import matplotlib
 from stereo_cam import StereoCam
 from fastSAM import FastSAMSeg
 from bev import calculate_bev_image
+from stixels import Stixels
+from stixels import create_polygon_from_3d_points
+from shapely.geometry import Polygon
+import geopandas as gpd
+import matplotlib.pyplot as plt
+
+matplotlib.use('Agg')
 
 dataset = "summer_2023"
 start_frame = 0
@@ -15,6 +23,8 @@ save_video = False
 show_horizon = False
 create_bev = False
 save_bev = False
+plot_polygon = False
+save_polygon_video = True
 mode = "fusion" #"rwps"
 iou_threshold = 0.1
 fastsam_model_path = "weights/FastSAM-x.pt"
@@ -24,8 +34,8 @@ onedrive_dir = "/Users/johannesskaro/OneDrive - NTNU/summer-2023"
 src_dir = "/Users/johannesskaro/Documents/KYB 5.år/fusedWSS"
 
 
-sequence = "2023-07-11_11-46-15_5256916_HD1080_FPS15"
-#sequence = "2023-07-11_12-49-30_5256916_HD1080_FPS15"
+#sequence = "2023-07-11_11-46-15_5256916_HD1080_FPS15"
+sequence = "2023-07-11_12-49-30_5256916_HD1080_FPS15"
 
 RESULTS_FOLDER = f"{onedrive_dir}/{sequence}"
 
@@ -50,9 +60,18 @@ if save_video:
         (W, H),
     )
 
+if save_polygon_video:
+    fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
+    out_polygon = cv2.VideoWriter(
+        f"{src_dir}/results/video_{dataset}_polygon_BEV_wide_stixels_dock.mp4",
+        fourcc,
+        FPS,
+        (H, H),
+    )
 
 fastsam = FastSAMSeg(model_path=fastsam_model_path)
 rwps3d = RWPS()
+stixels = Stixels()
 
 baseline = np.linalg.norm(T)
 cam_params = {"cx": K[0,2], "cy": K[1,2], "fx": K[0,0], "fy":K[1,1], "b": baseline}
@@ -107,13 +126,13 @@ for ti in range(0, len(timestamps)):
 
     depth_img = baseline * f / disparity_img
 
-    depth_img[depth_img > 100] = 0
+    depth_img[depth_img > 40] = 0
 
     ### COMMON
     (H, W, D) = left_img.shape
 
     # Run RWPS segmentation
-    rwps_mask_3d, plane_params_3d = rwps3d.segment_water_plane_using_point_cloud(
+    rwps_mask_3d, plane_params_3d, rwps_succeded = rwps3d.segment_water_plane_using_point_cloud(
         left_img.astype(np.uint8), depth_img
     )
     rwps_mask_3d = rwps_mask_3d.astype(int)
@@ -226,6 +245,41 @@ for ti in range(0, len(timestamps)):
             thickness=5,
         )
 
+    stixel_mask, stixel_positions = stixels.get_stixels(water_mask)
+    stixel_width = stixels.get_stixel_width(W)
+    stixels_3d_points = ut.calculate_3d_points_from_stixel_positions(stixel_positions, stixel_width, depth_img, cam_params)
+    stixels_polygon = create_polygon_from_3d_points(stixels_3d_points)
+
+    cv2.imshow("Stixels", stixel_mask.astype(np.uint8) * 255)
+    cv2.imshow("Depth", depth_img.astype(np.uint8) * 255)
+
+    if plot_polygon:
+
+        myPoly = gpd.GeoSeries([stixels_polygon])
+        myPoly.plot()
+        plt.draw()
+        plt.pause(0.5)
+        plt.close()
+
+    if save_polygon_video:
+
+        myPoly = gpd.GeoSeries([stixels_polygon])
+        dpi = 100
+        fig, ax = plt.subplots(figsize=(H / dpi, H / dpi), dpi=dpi)
+        myPoly.plot(ax=ax)
+        fig.canvas.draw()
+        # Convert the plot to a numpy array (RGB image)
+        img = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+        img = img.reshape(fig.canvas.get_width_height()[::-1] + (4,))  # Reshape to (height, width, 4)
+        plt.close(fig)
+        img_rgb = img[:, :, :3]
+
+        polygon_BEV_image_resized = cv2.resize(img_rgb, (H, H))
+        polygon_BEV_image_resized_bgr = cv2.cvtColor(polygon_BEV_image_resized, cv2.COLOR_RGB2BGR)
+        out_polygon.write(polygon_BEV_image_resized_bgr)
+
+
+
     if create_bev:
         bev_image = None
         points_ccf = ut.calculate_3d_points_from_mask(water_mask, depth_img, cam_params)
@@ -289,4 +343,7 @@ if mode == "horizon":
     plt.show()
 if save_video:
     out.release()
+
+if save_polygon_video:
+    out_polygon.release()
 

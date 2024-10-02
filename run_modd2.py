@@ -5,17 +5,27 @@ import os
 from utilities import pohang_2_intrinsics_extrinsics, mods_2_intrinsics_extrinsics
 import utilities as ut
 import matplotlib.pyplot as plt
+import matplotlib
 from stereo_cam import StereoCam
 from fastSAM import FastSAMSeg
+from stixels import Stixels
+from stixels import create_polygon_from_3d_points
 from bev import calculate_bev_image
+from shapely.geometry import Polygon
+import geopandas as gpd
+import matplotlib.pyplot as plt
+
+matplotlib.use('Agg')
 
 dataset = "modd2"
 start_frame = 0
-save_video = True
+save_video = False
 show_horizon = False
 create_bev = False
 save_bev = False
-mode = "fusion" #"rwps"
+plot_polygon = True
+save_polygon_video = False
+mode = "fusion" #"fastsam" #"rwps"
 iou_threshold = 0.1
 fastsam_model_path = "weights/FastSAM-x.pt"
 device = "mps"
@@ -28,7 +38,7 @@ if dataset == "modd2":
     #sequence = "kope81-00-00019370-00019710" #cruise ship
     #sequence = "kope75-00-00013780-00014195" #gummibåt
     #sequence = "kope75-00-00062200-00062500" #havn
-    sequence = "kope71-01-00014337-00014547"
+    sequence = "kope71-01-00014337-00014547" #good performance
     
 
     W, H = (1278, 958)
@@ -77,15 +87,25 @@ if dataset == "modd2":
 if save_video:
     fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
     out = cv2.VideoWriter(
-        f"{src_dir}/results/video_{dataset}_fusedWSS_{sequence[:6]+sequence[-4:]}.mp4",
+        f"{src_dir}/results/video_{dataset}_{mode}_{sequence[:6]+sequence[-4:]}.mp4",
         fourcc,
         10.0,
         (W, H-1),
     )
 
+if save_polygon_video:
+    fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
+    out_polygon = cv2.VideoWriter(
+        f"{src_dir}/results/video_{dataset}_polygon_BEV_wide_stixels_dock.mp4",
+        fourcc,
+        10.0,
+        (H, H-1),
+    )
+
 stereo = StereoCam(intrinsics, extrinsics)
 fastsam = FastSAMSeg(model_path=fastsam_model_path)
 rwps3d = RWPS()
+stixels = Stixels()
 
 cam_params = stereo.get_basic_camera_parameters()
 P1 = stereo.get_left_projection_matrix()
@@ -180,7 +200,7 @@ while curr_frame < num_frames - 1:
     (H, W, D) = left_img.shape
 
     # Run RWPS segmentation
-    rwps_mask_3d, plane_params_3d = rwps3d.segment_water_plane_using_point_cloud(
+    rwps_mask_3d, plane_params_3d, rwps_succeeded = rwps3d.segment_water_plane_using_point_cloud(
         left_img.astype(np.uint8), depth_img
     )
     rwps_mask_3d = rwps_mask_3d.astype(int)
@@ -204,54 +224,91 @@ while curr_frame < num_frames - 1:
 
     water_mask = np.zeros_like(depth_img)
 
+    # FastSAM classifier
+    if mode == "fastsam":
+        left_image_kept = left_img.copy()[horizon_cutoff:, :]
+        rwps_mask_3d = rwps_mask_3d[horizon_cutoff:, :]
+
+        water_mask = fastsam.get_mask_at_points(
+            left_image_kept,
+            [[(W - 1) // 2, left_image_kept.shape[0] - 100]],
+            pointlabel=[1],
+            device=device,
+        ).astype(int)
+        water_mask = water_mask.reshape(rwps_mask_3d.shape)
+
+        water_mask2 = np.zeros((H, W), dtype=np.uint8)
+        water_mask2[horizon_cutoff:] = water_mask
+        water_mask = water_mask2
+
     # Run FastSAM segmentation
-    if mode == "fusion":
+    elif mode == "fusion":
 
-        left_img_cut = left_img.copy()[horizon_cutoff:, :]
-        fastsam_masks_cut = fastsam.get_all_masks(left_img_cut, device=device).astype(
-            int
-        )
-        fastsam_masks = np.full((fastsam_masks_cut.shape[0], H, W), False)
+        if rwps_succeeded == False:
+            #Use fastsam
+            print("RWPS failed, using FastSAM")
+            left_image_kept = left_img.copy()[horizon_cutoff:, :]
+            rwps_mask_3d = rwps_mask_3d[horizon_cutoff:, :]
 
-        if len(fastsam_masks):
-            fastsam_masks[:, horizon_cutoff:, :] = fastsam_masks_cut
+            water_mask = fastsam.get_mask_at_points(
+                left_image_kept,
+                [[(W - 1) // 2, left_image_kept.shape[0] - 100]],
+                pointlabel=[1],
+                device=device,
+            ).astype(int)
+            water_mask = water_mask.reshape(rwps_mask_3d.shape)
 
-            # Stack all FastSAM masks into a 3D array (height, width, num_masks)
-            fastsam_masks_stack = np.stack(fastsam_masks, axis=-1)
-
-            # Calculate IoU for each mask in a vectorized manner
-            iou_scores = np.array(
-                [
-                    ut.calculate_iou(rwps_mask_3d, fastsam_masks_stack[:, :, i])
-                    for i in range(fastsam_masks_stack.shape[-1])
-                ]
-            )
-
-            # Find the index of the mask with maximum IoU
-            max_corr_index = np.argmax(iou_scores)
-            keep_indexes = np.argwhere(iou_scores > iou_threshold)
-
-            # Combine the selected FastSAM mask with the rwps mask
-            water_mask = np.clip(
-                fastsam_masks_stack[:, :, max_corr_index] + rwps_mask_3d, 0, 1
-            )
-
-            # Create a mask indicating which masks to subtract (all masks except the one with max correlation)
-            masks_to_subtract = np.ones(fastsam_masks.shape[0], dtype=bool)
-            masks_to_subtract[keep_indexes] = False
-
-            # Subtract all the remaining FastSAM masks from water_mask in a vectorized manner
-            distractions_mask = np.any(fastsam_masks[masks_to_subtract], axis=0)
-            water_mask = np.clip(water_mask - distractions_mask, 0, 1)
-            iou_subtracts = iou_scores[masks_to_subtract]
-            #print(
-            #    iou_scores[keep_indexes],
-            #    np.sort(iou_subtracts[iou_subtracts != 0])[::-1],
-            #)
+            water_mask2 = np.zeros((H, W), dtype=np.uint8)
+            water_mask2[horizon_cutoff:] = water_mask
+            water_mask = water_mask2
 
         else:
-            water_mask = rwps_mask_3d
-            distractions_mask = np.zeros_like(water_mask)
+            print("RWPS succeeded, using fusion")
+            left_img_cut = left_img.copy()[horizon_cutoff:, :]
+            fastsam_masks_cut = fastsam.get_all_masks(left_img_cut, device=device).astype(
+                int
+            )
+            fastsam_masks = np.full((fastsam_masks_cut.shape[0], H, W), False)
+
+            if len(fastsam_masks):
+                fastsam_masks[:, horizon_cutoff:, :] = fastsam_masks_cut
+
+                # Stack all FastSAM masks into a 3D array (height, width, num_masks)
+                fastsam_masks_stack = np.stack(fastsam_masks, axis=-1)
+
+                # Calculate IoU for each mask in a vectorized manner
+                iou_scores = np.array(
+                    [
+                        ut.calculate_iou(rwps_mask_3d, fastsam_masks_stack[:, :, i])
+                        for i in range(fastsam_masks_stack.shape[-1])
+                    ]
+                )
+
+                # Find the index of the mask with maximum IoU
+                max_corr_index = np.argmax(iou_scores)
+                keep_indexes = np.argwhere(iou_scores > iou_threshold)
+
+                # Combine the selected FastSAM mask with the rwps mask
+                water_mask = np.clip(
+                    fastsam_masks_stack[:, :, max_corr_index] + rwps_mask_3d, 0, 1
+                )
+
+                # Create a mask indicating which masks to subtract (all masks except the one with max correlation)
+                masks_to_subtract = np.ones(fastsam_masks.shape[0], dtype=bool)
+                masks_to_subtract[keep_indexes] = False
+
+                # Subtract all the remaining FastSAM masks from water_mask in a vectorized manner
+                distractions_mask = np.any(fastsam_masks[masks_to_subtract], axis=0)
+                water_mask = np.clip(water_mask - distractions_mask, 0, 1)
+                iou_subtracts = iou_scores[masks_to_subtract]
+                #print(
+                #    iou_scores[keep_indexes],
+                #    np.sort(iou_subtracts[iou_subtracts != 0])[::-1],
+                #)
+
+    else:
+        water_mask = rwps_mask_3d
+        distractions_mask = np.zeros_like(water_mask)
 
 
     water_mask = np.logical_and(water_mask, mask_not_usvpartsL)
@@ -277,11 +334,44 @@ while curr_frame < num_frames - 1:
             [57, 255, 20],
             thickness=5,
         )
+    stixel_mask, stixel_positions = stixels.get_stixels(water_mask)
+    stixel_width = stixels.get_stixel_width(W)
+    stixels_3d_points = ut.calculate_3d_points_from_stixel_positions(stixel_positions, stixel_width, depth_img, cam_params)
+    stixels_polygon = create_polygon_from_3d_points(stixels_3d_points)
+
+    cv2.imshow("Stixels", stixel_mask.astype(np.uint8) * 255)
+    cv2.imshow("Depth", depth_img.astype(np.uint8) * 255)
+
+    if plot_polygon:
+
+        myPoly = gpd.GeoSeries([stixels_polygon])
+        myPoly.plot()
+        plt.draw()
+        plt.pause(0.5)
+        plt.close()
+
+    if save_polygon_video:
+
+        myPoly = gpd.GeoSeries([stixels_polygon])
+        dpi = 100
+        fig, ax = plt.subplots(figsize=(H / dpi, H / dpi), dpi=dpi)
+        myPoly.plot(ax=ax)
+        fig.canvas.draw()
+        # Convert the plot to a numpy array (RGB image)
+        img = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+        img = img.reshape(fig.canvas.get_width_height()[::-1] + (4,))  # Reshape to (height, width, 4)
+        plt.close(fig)
+        img_rgb = img[:, :, :3]
+
+        polygon_BEV_image_resized = cv2.resize(img_rgb, (H, H))
+        polygon_BEV_image_resized_bgr = cv2.cvtColor(polygon_BEV_image_resized, cv2.COLOR_RGB2BGR)
+        out_polygon.write(polygon_BEV_image_resized_bgr)
 
     if create_bev:
         bev_image = None
-        points_ccf = ut.calculate_3d_points_from_mask(water_mask, depth_img, cam_params)
-        if mode == "fusion":
+        #points_ccf = ut.calculate_3d_points_from_mask(water_mask, depth_img, cam_params)
+        points_ccf = ut.calculate_3d_points_from_mask(stixel_mask, depth_img, cam_params)
+        if mode == "fusion" and rwps_succeeded:
             subtract_points_ccf = ut.calculate_3d_points_from_mask(
                 distractions_mask, depth_img, cam_params
             )
@@ -296,7 +386,7 @@ while curr_frame < num_frames - 1:
                 points, colors=colors, image_size=(500, 600)
             )
 
-        elif mode == "fastsam" or mode == "rwps":
+        else:
             colors = np.array(points_ccf.shape[0] * [[200, 100, 0]])
             bev_image = calculate_bev_image(
                 points_ccf, colors=colors, image_size=(500, 600)
@@ -341,4 +431,6 @@ if mode == "horizon":
     plt.show()
 if save_video:
     out.release()
+if save_polygon_video:
+    out_polygon.release()
 

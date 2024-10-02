@@ -77,6 +77,8 @@ class RWPS:
         depth: np.array,
     ) -> np.array:
 
+        valid = True
+
         assert self.cam_params is not None, "Camera parameters are not provided."
 
         if self.config_file is None:
@@ -115,7 +117,8 @@ class RWPS:
         if len(pcd.points) < self.ransac_n:
             print("Not enough points to segment plane")
             self.prev_planemodel = None
-            return np.zeros((H, W)), np.array([0, 1, 0, 1])
+            valid = False
+            return np.zeros((H, W)), np.array([0, 1, 0, 1]), valid
 
         plane_model, _ = pcd.segment_plane(
             distance_threshold=self.distance_threshold,
@@ -126,7 +129,8 @@ class RWPS:
 
         if not plane_model.any():  # if plane_model is empty
             print("No plane found")
-            return np.zeros((H, W)), np.array([0, 1, 0, 1])
+            valid = False
+            return np.zeros((H, W)), np.array([0, 1, 0, 1]), valid
 
         normal = plane_model[:3]
         d = plane_model[3]
@@ -146,7 +150,7 @@ class RWPS:
         self.prev_height = height
         self.prev_unitnormal = unit_normal
         self.prev_mask = mask
-        return mask, plane_model
+        return mask, plane_model, valid
     
     def get_segmentation_mask_from_plane_model(self, points_3d, plane_model):
 

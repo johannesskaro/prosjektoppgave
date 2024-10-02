@@ -2,9 +2,11 @@ import numpy as np
 from ultralytics import FastSAM
 from ultralytics.models.fastsam import FastSAMPredictor
 import cv2
+from stixels import Stixels
+import bev
 
 # Load model
-model_path = "weights/FastSAM-x.pt"
+model_path = "weights/FastSAM-s.pt"
 model = FastSAM(model_path)
 device = "mps"
 
@@ -27,8 +29,16 @@ mask = np.array(ann[0].masks.data[0]) if ann[0].masks else np.zeros((img.shape[0
 
 mask = np.array(ann[0].masks.data[0]) if ann[0].masks else np.zeros((img.shape[0], img.shape[1]))
 
+stixel = Stixels()
+stixel_mask = stixel.get_stixels(mask)
+
+
+
 # Display results
 cv2.imshow("mask", mask)
+cv2.waitKey(0)
+
+cv2.imshow("mask", stixel_mask)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
 

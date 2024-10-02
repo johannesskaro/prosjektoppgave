@@ -98,6 +98,24 @@ def calculate_3d_points_from_mask(mask, depth_map, cam_params):
 
     return points_3d
 
+def calculate_3d_points_from_stixel_positions(stixel_positions, stixel_width, depth_map, cam_params):
+
+    d = np.array([])
+    for n, stixel_pos in enumerate(stixel_positions):
+        x_start = max(0, n * stixel_width - stixel_width // 2)
+        x_end = min(depth_map.shape[1], (n + 1) * stixel_width - stixel_width // 2)
+        depth_along_stixel = depth_map[int(stixel_pos[1]), x_start:x_end]
+        if depth_along_stixel.size == 0: #no depth values in stixel
+            stixel_positions = np.delete(stixel_positions, n, axis=0)
+        else:
+            avg_depth = np.mean(depth_along_stixel[depth_along_stixel > 0])
+            d = np.append(d, avg_depth)
+
+    X = stixel_positions[:, 0]
+    Y = stixel_positions[:, 1]
+    points_3d = calculate_3d_points(X, Y, d, cam_params)
+    return points_3d
+
 
 from scipy.spatial.transform import Rotation
 
