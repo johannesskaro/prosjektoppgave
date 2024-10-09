@@ -1,9 +1,20 @@
 import numpy as np
 from shapely.geometry import Polygon
+from collections import deque
 
 class Stixels:
-    def __init__(self, num_of_stixels = 20) -> None:
-        self.num_stixels = num_of_stixels # 958//47 #gir 20
+
+    N = 10
+    stixel_2d_points_N_frames = deque(maxlen=N)
+
+    def __init__(self, num_of_stixels = 60) -> None:
+        self.num_stixels = num_of_stixels # 958//47 #gir 20I wan 
+
+    def get_stixel_2d_points_N_frames(self) -> np.array:
+        return self.stixel_2d_points_N_frames
+
+    def add_stixel_2d_points(self, stixel_2d_points: np.array) -> None:
+        self.stixel_2d_points_N_frames.append(stixel_2d_points)
 
     def get_stixel_width(self, img_width) -> int:
     
@@ -69,11 +80,13 @@ class Stixels:
         return stixel_mask, stixel_positions
     
     
-def create_polygon_from_3d_points(points: list) -> Polygon:
+def create_polygon_from_2d_points(points: list) -> Polygon:
 
     if len(points) < 2:
-        raise ValueError("Cannot create a polygon with less than 2 points.")
-    polygon_points = points[:, [0, 2]]
+        print("Cannot create a polygon with less than 2 points.")
+        return Polygon()
+    #polygon_points = points[:, [0, 2]]
+    polygon_points = points
     origin = np.array([0, 0])
     polygon_points = np.vstack([polygon_points, origin])
 

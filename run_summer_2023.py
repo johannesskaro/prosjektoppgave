@@ -10,12 +10,14 @@ from stereo_cam import StereoCam
 from fastSAM import FastSAMSeg
 from bev import calculate_bev_image
 from stixels import Stixels
-from stixels import create_polygon_from_3d_points
+from stixels import create_polygon_from_2d_points
 from shapely.geometry import Polygon
 import geopandas as gpd
 import matplotlib.pyplot as plt
+from smooth import fit_gmm, plot_gmm, get_contour_points_from_gmm, fit_b_spline, plot_b_spline
 
-matplotlib.use('Agg')
+
+#matplotlib.use('Agg')
 
 dataset = "summer_2023"
 start_frame = 0
@@ -23,8 +25,10 @@ save_video = False
 show_horizon = False
 create_bev = False
 save_bev = False
+create_polygon = False
 plot_polygon = False
-save_polygon_video = True
+save_polygon_video = False
+
 mode = "fusion" #"rwps"
 iou_threshold = 0.1
 fastsam_model_path = "weights/FastSAM-x.pt"
@@ -63,7 +67,7 @@ if save_video:
 if save_polygon_video:
     fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
     out_polygon = cv2.VideoWriter(
-        f"{src_dir}/results/video_{dataset}_polygon_BEV_wide_stixels_dock.mp4",
+        f"{src_dir}/results/video_{dataset}_polygon_BEV_gmm_dock.mp4",
         fourcc,
         FPS,
         (H, H),
@@ -245,10 +249,20 @@ for ti in range(0, len(timestamps)):
             thickness=5,
         )
 
-    stixel_mask, stixel_positions = stixels.get_stixels(water_mask)
-    stixel_width = stixels.get_stixel_width(W)
-    stixels_3d_points = ut.calculate_3d_points_from_stixel_positions(stixel_positions, stixel_width, depth_img, cam_params)
-    stixels_polygon = create_polygon_from_3d_points(stixels_3d_points)
+    if create_polygon:
+        stixel_mask, stixel_positions = stixels.get_stixels(water_mask)
+        stixel_width = stixels.get_stixel_width(W)
+        stixels_2d_points = ut.calculate_2d_points_from_stixel_positions(stixel_positions, stixel_width, depth_img, cam_params)
+        stixels.add_stixel_2d_points(stixels_2d_points)
+        stixels_polygon = create_polygon_from_2d_points(stixels_2d_points)
+        #points_N_frames = stixels.get_stixel_2d_points_N_frames()
+        #points_N_frames_reshaped = np.array(list(points_N_frames)).reshape(-1, 2)
+        #gmm = fit_gmm(points_N_frames_reshaped, n_components=100)
+        #stixels_polygon = get_contour_points_from_gmm(gmm)
+        #stixels_polygon = fit_b_spline(points_N_frames_reshaped, num_new_points=100)
+        #print(stixels_polygon)
+        #plot_gmm(gmm, points_N_frames_reshaped)  
+        #plot_b_spline(points_N_frames_reshaped, stixels_polygon)
 
     cv2.imshow("Stixels", stixel_mask.astype(np.uint8) * 255)
     cv2.imshow("Depth", depth_img.astype(np.uint8) * 255)

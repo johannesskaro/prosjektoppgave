@@ -9,22 +9,25 @@ import matplotlib
 from stereo_cam import StereoCam
 from fastSAM import FastSAMSeg
 from stixels import Stixels
-from stixels import create_polygon_from_3d_points
+from stixels import create_polygon_from_2d_points
 from bev import calculate_bev_image
 from shapely.geometry import Polygon
 import geopandas as gpd
 import matplotlib.pyplot as plt
+from temporal_smoothing import TemporalSmoothing
 
 matplotlib.use('Agg')
 
 dataset = "modd2"
 start_frame = 0
-save_video = False
+save_video = True
 show_horizon = False
 create_bev = False
 save_bev = False
-plot_polygon = True
-save_polygon_video = False
+create_polygon = True
+plot_polygon = False
+save_polygon_video = True
+use_temporal_smoothing = True
 mode = "fusion" #"fastsam" #"rwps"
 iou_threshold = 0.1
 fastsam_model_path = "weights/FastSAM-x.pt"
@@ -38,7 +41,9 @@ if dataset == "modd2":
     #sequence = "kope81-00-00019370-00019710" #cruise ship
     #sequence = "kope75-00-00013780-00014195" #gummibåt
     #sequence = "kope75-00-00062200-00062500" #havn
-    sequence = "kope71-01-00014337-00014547" #good performance
+    #sequence = "kope71-01-00014337-00014547" #good performance
+    #sequence = "kope75-00-00037550-00037860" # good performance
+    sequence = "kope75-00-00021500-00022160"
     
 
     W, H = (1278, 958)
@@ -87,7 +92,7 @@ if dataset == "modd2":
 if save_video:
     fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
     out = cv2.VideoWriter(
-        f"{src_dir}/results/video_{dataset}_{mode}_{sequence[:6]+sequence[-4:]}.mp4",
+        f"{src_dir}/results/video_{dataset}_{mode}_{sequence[:6]+sequence[-4:]}_temporal_smoothing.mp4",
         fourcc,
         10.0,
         (W, H-1),
@@ -96,16 +101,17 @@ if save_video:
 if save_polygon_video:
     fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
     out_polygon = cv2.VideoWriter(
-        f"{src_dir}/results/video_{dataset}_polygon_BEV_wide_stixels_dock.mp4",
+        f"{src_dir}/results/video_{dataset}_polygon_{mode}_{sequence[:6]+sequence[-4:]}_temporal_smoothing.mp4",
         fourcc,
         10.0,
-        (H, H-1),
+        (H-1, H-1),
     )
 
 stereo = StereoCam(intrinsics, extrinsics)
 fastsam = FastSAMSeg(model_path=fastsam_model_path)
 rwps3d = RWPS()
 stixels = Stixels()
+temporal_smoothing = TemporalSmoothing()
 
 cam_params = stereo.get_basic_camera_parameters()
 P1 = stereo.get_left_projection_matrix()
@@ -195,6 +201,7 @@ while curr_frame < num_frames - 1:
     depth_img = stereo.get_depth_map(
         left_img, right_img, rectify_images=False, stereo_matcher=stereo_matcher
     )
+    depth_img[depth_img > 60] = 0
 
     ### COMMON
     (H, W, D) = left_img.shape
@@ -313,6 +320,9 @@ while curr_frame < num_frames - 1:
 
     water_mask = np.logical_and(water_mask, mask_not_usvpartsL)
     #water_mask = ut.remove_obstacles_from_watermask(water_mask, gt_obstacles)
+    if use_temporal_smoothing:
+        water_mask = temporal_smoothing.get_smoothed_water_mask(water_mask)
+
     blue_water_mask = water_mask
 
     nonwater_mask = np.logical_not(water_mask)
@@ -334,13 +344,16 @@ while curr_frame < num_frames - 1:
             [57, 255, 20],
             thickness=5,
         )
-    stixel_mask, stixel_positions = stixels.get_stixels(water_mask)
-    stixel_width = stixels.get_stixel_width(W)
-    stixels_3d_points = ut.calculate_3d_points_from_stixel_positions(stixel_positions, stixel_width, depth_img, cam_params)
-    stixels_polygon = create_polygon_from_3d_points(stixels_3d_points)
 
-    cv2.imshow("Stixels", stixel_mask.astype(np.uint8) * 255)
-    cv2.imshow("Depth", depth_img.astype(np.uint8) * 255)
+
+    if create_polygon:    
+        stixel_mask, stixel_positions = stixels.get_stixels(water_mask)
+        stixel_width = stixels.get_stixel_width(W)
+        stixels_2d_points = ut.calculate_2d_points_from_stixel_positions(stixel_positions, stixel_width, depth_img, cam_params)
+        stixels_polygon = create_polygon_from_2d_points(stixels_2d_points)
+
+        cv2.imshow("Stixels", stixel_mask.astype(np.uint8) * 255)
+        cv2.imshow("Depth", depth_img.astype(np.uint8) * 255)
 
     if plot_polygon:
 
@@ -354,7 +367,7 @@ while curr_frame < num_frames - 1:
 
         myPoly = gpd.GeoSeries([stixels_polygon])
         dpi = 100
-        fig, ax = plt.subplots(figsize=(H / dpi, H / dpi), dpi=dpi)
+        fig, ax = plt.subplots(figsize=((H-1) / dpi, (H -1 ) / dpi), dpi=dpi)
         myPoly.plot(ax=ax)
         fig.canvas.draw()
         # Convert the plot to a numpy array (RGB image)
@@ -363,7 +376,7 @@ while curr_frame < num_frames - 1:
         plt.close(fig)
         img_rgb = img[:, :, :3]
 
-        polygon_BEV_image_resized = cv2.resize(img_rgb, (H, H))
+        polygon_BEV_image_resized = cv2.resize(img_rgb, (H-1, H-1))
         polygon_BEV_image_resized_bgr = cv2.cvtColor(polygon_BEV_image_resized, cv2.COLOR_RGB2BGR)
         out_polygon.write(polygon_BEV_image_resized_bgr)
 

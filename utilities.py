@@ -98,23 +98,42 @@ def calculate_3d_points_from_mask(mask, depth_map, cam_params):
 
     return points_3d
 
-def calculate_3d_points_from_stixel_positions(stixel_positions, stixel_width, depth_map, cam_params):
+def calculate_2d_points_from_stixel_positions(stixel_positions, stixel_width, depth_map, cam_params):
+    height, width = depth_map.shape
+    # add stixels in front left and right
+
+    stixel_positions = stixel_positions[stixel_positions[:, 0].argsort()]
+    #front_left_pos = np.array([stixel_positions[0][0], height-1])
+    #front_right_pos = np.array([stixel_positions[-1][0], height-1])
+
+    #stixel_positions = np.insert(stixel_positions, 0, front_left_pos, axis=0)
+    #stixel_positions = np.vstack([stixel_positions, front_right_pos])
 
     d = np.array([])
+    d_invalid = np.array([])
     for n, stixel_pos in enumerate(stixel_positions):
         x_start = max(0, n * stixel_width - stixel_width // 2)
         x_end = min(depth_map.shape[1], (n + 1) * stixel_width - stixel_width // 2)
         depth_along_stixel = depth_map[int(stixel_pos[1]), x_start:x_end]
+        depth_along_stixel = depth_along_stixel[depth_along_stixel > 0]
+        depth_along_stixel = depth_along_stixel[~np.isnan(depth_along_stixel)]
         if depth_along_stixel.size == 0: #no depth values in stixel
-            stixel_positions = np.delete(stixel_positions, n, axis=0)
+            #stixel_positions = np.delete(stixel_positions, n, axis=0)
+            d_invalid = np.append(d_invalid, int(n))
         else:
             avg_depth = np.mean(depth_along_stixel[depth_along_stixel > 0])
             d = np.append(d, avg_depth)
-
+    
+    d_invalid = np.array(d_invalid, dtype=int)
     X = stixel_positions[:, 0]
+    X = np.delete(X, d_invalid)
     Y = stixel_positions[:, 1]
+    Y = np.delete(Y, d_invalid)
     points_3d = calculate_3d_points(X, Y, d, cam_params)
-    return points_3d
+
+    points_2d = points_3d[:, [0, 2]]
+
+    return points_2d
 
 
 from scipy.spatial.transform import Rotation
