@@ -16,18 +16,18 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 from temporal_smoothing import TemporalSmoothing
 
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 
 dataset = "modd2"
 start_frame = 0
-save_video = True
+save_video = False
 show_horizon = False
 create_bev = False
 save_bev = False
-create_polygon = True
+create_polygon = False
 plot_polygon = False
-save_polygon_video = True
-use_temporal_smoothing = True
+save_polygon_video = False
+use_temporal_smoothing = False
 mode = "fusion" #"fastsam" #"rwps"
 iou_threshold = 0.1
 fastsam_model_path = "weights/FastSAM-x.pt"
@@ -112,6 +112,8 @@ fastsam = FastSAMSeg(model_path=fastsam_model_path)
 rwps3d = RWPS()
 stixels = Stixels()
 temporal_smoothing = TemporalSmoothing()
+
+stereo.plot_BEV_depth_uncertainty()
 
 cam_params = stereo.get_basic_camera_parameters()
 P1 = stereo.get_left_projection_matrix()

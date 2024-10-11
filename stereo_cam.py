@@ -203,3 +203,51 @@ class StereoCam:
     def get_camera_matrix(self, fx, fy, cx, cy):
         K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
         return K
+    
+
+    def plot_BEV_depth_uncertainty(self):
+        """
+        Plot depth uncertainty.
+        """
+
+        B = self.baseline
+        f = self.intrinsicsL["fx"]
+
+        sigma_px = 1.0  # Disparity uncertainty in pixels
+        fov = 84  # degrees. Zed2i has 84
+        z_min, z_max = 0.5, 35  # Min and max depth (in meters)
+        x_min, x_max = -32, 32  # Min and max horizontal extent of the grid (in meters)
+
+        # Create a grid of points in bird's eye view
+        n_points = 500  # Number of points in each dimension
+        x_vals = np.linspace(x_min, x_max, n_points)  # Horizontal (x)
+        z_vals = np.linspace(z_min, z_max, n_points)  # Depth (z)
+        X, Z = np.meshgrid(x_vals, z_vals)
+
+        # Calculate depth uncertainty sigma_z using the corrected formula
+        sigma_z = (Z**2 / (B * f)) * sigma_px
+
+        # Create a mask for the FOV cone (90 degrees)
+        fov_rad = np.radians(fov) / 2  # Half of the FOV in radians
+        # Calculate the angle for each point in the grid
+        angles = np.abs(np.arctan2(X, Z))
+        # Mask: only points within the FOV cone (|angle| <= fov_rad)
+        fov_mask = angles <= fov_rad
+
+        # Apply the mask to sigma_z
+        sigma_z_masked = np.where(fov_mask, sigma_z, np.nan)
+
+        # Create the plot
+        plt.figure(figsize=(10, 6))
+        contour = plt.contourf(X, Z, sigma_z_masked, cmap='jet', levels=50)
+        plt.colorbar(contour, label='Depth Uncertainty $\sigma_z$ (meters)')
+        plt.title(f'BEV of Depth Uncertainty within FOV Cone with $\\sigma_{{px}}$ = {sigma_px} pixel')
+        plt.xlabel('X position (meters)')
+        plt.ylabel('Z position (meters)')
+        plt.gca().set_aspect('equal', adjustable='box')
+
+        # Set limits to show the whole grid
+        plt.xlim(x_min, x_max)
+        plt.ylim(z_min, z_max)
+        plt.show()
+
