@@ -28,6 +28,8 @@ save_bev = False
 create_polygon = False
 plot_polygon = False
 save_polygon_video = False
+create_rectangular_stixels = True
+use_temporal_smoothing = False
 
 mode = "fusion" #"rwps"
 iou_threshold = 0.1
@@ -249,6 +251,10 @@ for ti in range(0, len(timestamps)):
             thickness=5,
         )
 
+    if create_rectangular_stixels:
+        rectangular_stixel_mask = stixels.create_rectangular_stixels(water_mask, disparity_img)
+        cv2.imshow("Rectangular Stixels", rectangular_stixel_mask.astype(np.uint8) * 255)
+
     if create_polygon:
         stixel_mask, stixel_positions = stixels.get_stixels(water_mask)
         stixel_width = stixels.get_stixel_width(W)
@@ -264,8 +270,8 @@ for ti in range(0, len(timestamps)):
         #plot_gmm(gmm, points_N_frames_reshaped)  
         #plot_b_spline(points_N_frames_reshaped, stixels_polygon)
 
-    cv2.imshow("Stixels", stixel_mask.astype(np.uint8) * 255)
-    cv2.imshow("Depth", depth_img.astype(np.uint8) * 255)
+    #cv2.imshow("Stixels", stixel_mask.astype(np.uint8) * 255)
+    cv2.imshow("Depth", depth_img.astype(np.uint8))
 
     if plot_polygon:
 

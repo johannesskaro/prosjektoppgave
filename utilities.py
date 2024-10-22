@@ -2,6 +2,10 @@ import cv2
 import numpy as np
 import scipy.io
 from scipy.interpolate import interp1d
+import json
+import os
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 
 def blend_image_with_mask(img, mask, color=[0, 0, 255], alpha1=1, alpha2=1):
@@ -98,43 +102,6 @@ def calculate_3d_points_from_mask(mask, depth_map, cam_params):
 
     return points_3d
 
-def calculate_2d_points_from_stixel_positions(stixel_positions, stixel_width, depth_map, cam_params):
-    height, width = depth_map.shape
-    # add stixels in front left and right
-
-    stixel_positions = stixel_positions[stixel_positions[:, 0].argsort()]
-    #front_left_pos = np.array([stixel_positions[0][0], height-1])
-    #front_right_pos = np.array([stixel_positions[-1][0], height-1])
-
-    #stixel_positions = np.insert(stixel_positions, 0, front_left_pos, axis=0)
-    #stixel_positions = np.vstack([stixel_positions, front_right_pos])
-
-    d = np.array([])
-    d_invalid = np.array([])
-    for n, stixel_pos in enumerate(stixel_positions):
-        x_start = max(0, n * stixel_width - stixel_width // 2)
-        x_end = min(depth_map.shape[1], (n + 1) * stixel_width - stixel_width // 2)
-        depth_along_stixel = depth_map[int(stixel_pos[1]), x_start:x_end]
-        depth_along_stixel = depth_along_stixel[depth_along_stixel > 0]
-        depth_along_stixel = depth_along_stixel[~np.isnan(depth_along_stixel)]
-        if depth_along_stixel.size == 0: #no depth values in stixel
-            #stixel_positions = np.delete(stixel_positions, n, axis=0)
-            d_invalid = np.append(d_invalid, int(n))
-        else:
-            avg_depth = np.mean(depth_along_stixel[depth_along_stixel > 0])
-            d = np.append(d, avg_depth)
-    
-    d_invalid = np.array(d_invalid, dtype=int)
-    X = stixel_positions[:, 0]
-    X = np.delete(X, d_invalid)
-    Y = stixel_positions[:, 1]
-    Y = np.delete(Y, d_invalid)
-    points_3d = calculate_3d_points(X, Y, d, cam_params)
-
-    points_2d = points_3d[:, [0, 2]]
-
-    return points_2d
-
 
 from scipy.spatial.transform import Rotation
 
@@ -229,6 +196,9 @@ def pohang_2_intrinsics_extrinsics(intrinsics, extrinsics):
             "v_fov": fov_y_right,
         },
     }
+    R_lidar_quat = extrinsics["lidar_front"]["quaternion"]
+    R_lidar = Rotation.from_quat(R_lidar_quat).as_matrix()
+    t_lidar = extrinsics["lidar_front"]["translation"]
 
     qL = extrinsics["stereo_left"]["quaternion"]
     tL = extrinsics["stereo_left"]["translation"]
@@ -256,11 +226,129 @@ def pohang_2_intrinsics_extrinsics(intrinsics, extrinsics):
         "rotation_matrix": R_POINTS_RIGHT_FROM_LEFT,
         "translation": t_POINTS_RIGHT_FROM_LEFT,
     }
+    return intrinsics, extrinsics, np.array(tL), np.array(RL), np.array(R_lidar), np.array(t_lidar)
+
+def pohang_2_extract_roll_pitch_yaw(file_path):
+    roll_pitch_yaw_list = []
+    
+    with open(file_path, 'r') as file:
+        for line in file:
+            parts = line.strip().split()
+            ts_euler = np.zeros(4)
+            if len(parts) >= 5:  # Ensuring there are at least 5 values (timestamp, x, y, z, w)
+                ts = float(parts[0])
+                x = float(parts[1])
+                y = float(parts[2])
+                z = float(parts[3])
+                w = float(parts[4])
+                quat = np.array([x, y, z, w])
+                euler = Rotation.from_quat(quat).as_euler('xyz')
+                ts_euler[1:] = euler
+                ts_euler[0] = ts
+                roll_pitch_yaw_list.append(ts_euler)
+                
+    return np.array(roll_pitch_yaw_list)
+
+def pohang_2_extract_camera_timstamps(file_path):
+
+    timestamps = []
+    with open(file_path, 'r') as file:
+        for line in file:
+            parts = line.split()
+            ts_img = [float(parts[0]), parts[1]]  # Second value stays as a string
+            timestamps.append(ts_img) 
+    
+    return np.array(timestamps)
+
+def pohang_2_match_ahrs_timestamps(image_timestamps, ahrs_data):
+    closest_indices = []
+
+    # Ensure the timestamps are floats
+    ahrs_data[:, 0] = ahrs_data[:, 0].astype(np.float64)
+    image_timestamps_float = image_timestamps[:, 0].astype(np.float64)
+
+    for img_ts in image_timestamps_float:
+        # Find the index of the closest AHRS timestamp
+        closest_index = np.argmin(np.abs(np.array(ahrs_data[:, 0]) - img_ts))
+        closest_indices.append(closest_index)
+    
+    ahrs_data_matched = ahrs_data[closest_indices]
+
+    return ahrs_data_matched
+
+def pohang_2_extract_lidar_timestamps(bin_files):
+    """
+    Extracts timestamps from LiDAR .bin file names.
+    
+    Args:
+        bin_files: List of LiDAR .bin file paths.
+        
+    Returns:
+        lidar_timestamps: List of timestamps extracted from the file names.
+    """
+    lidar_timestamps = []
+    for file in bin_files:
+        # Extract the file name without the extension, which is the timestamp
+        timestamp_str = os.path.splitext(os.path.basename(file))[0]
+        lidar_timestamps.append(int(timestamp_str))  # Convert to integer or float
+    return np.array(lidar_timestamps)
+
+def pohang_2_match_lidar_timestamps(image_timestamps, lidar_data_path):
+    unsorted_lidar_data = [
+    f
+    for f in os.listdir(lidar_data_path)
+    if os.path.isfile(os.path.join(lidar_data_path, f))
+    ]
+    lidar_data = sorted(unsorted_lidar_data, key=lambda x: int(x[:19]))
+    print(len(lidar_data))
+    lidar_timestamps = pohang_2_extract_lidar_timestamps(lidar_data)
+    closest_indices = []
+    #image_timestamps_float = image_timestamps[:, 0].astype(np.float64)
+
+    for img_ts in image_timestamps[:, 0]:
+        # Find the index of the closest lidar timestamp
+        cleaned_img_ts = img_ts.replace('.', '')
+        cleaned_img_ts_float = np.float64(cleaned_img_ts)
+        #print(cleaned_img_ts_float)
+        #print(lidar_timestamps)
+        closest_index = np.argmin(np.abs(lidar_timestamps - cleaned_img_ts_float))
+        closest_indices.append(closest_index)
+
+    #print(closest_indices)
+    lidar_data_matched = lidar_data[closest_indices]
+
+    return lidar_data_matched
+
+def load_intrinsics_and_extrinsics(intrinsics_file, extrinsics_file):
+    with open(intrinsics_file, 'r') as f:
+        intrinsics = json.load(f)
+    
+    with open(extrinsics_file, 'r') as f:
+        extrinsics = json.load(f)
+    
     return intrinsics, extrinsics
 
+def visualize_lidar_points(points):
+    """
+    Visualize the 3D LiDAR points using matplotlib.
+    
+    Args:
+        points: Nx3 numpy array containing the x, y, z coordinates of the points.
+    """
+    # Create a 3D plot
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Plot the points
+    ax.scatter(points[:, 0], points[:, 1], points[:, 2], c=points[:, 2], cmap='viridis', s=0.5)
+    
+    # Set labels
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
 
-import json
-
+    # Show the plot
+    plt.show()
 
 def usvinland_extrinsics():
     data = json.load("usvinland.json")

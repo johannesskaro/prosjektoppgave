@@ -9,7 +9,7 @@ import matplotlib
 from stereo_cam import StereoCam
 from fastSAM import FastSAMSeg
 from stixels import Stixels
-from stixels import create_polygon_from_2d_points
+from stixels import *
 from bev import calculate_bev_image
 from shapely.geometry import Polygon
 import geopandas as gpd
@@ -27,8 +27,11 @@ save_bev = False
 create_polygon = False
 plot_polygon = False
 save_polygon_video = False
+create_rectangular_stixels = True
 use_temporal_smoothing = False
-mode = "fusion" #"fastsam" #"rwps"
+use_temporal_smoothing_ego_motion_compensation = True
+visualize_ego_motion_compensation = True
+mode = "fastsam" #"fastsam" #"rwps"
 iou_threshold = 0.1
 fastsam_model_path = "weights/FastSAM-x.pt"
 device = "mps"
@@ -43,7 +46,7 @@ if dataset == "modd2":
     #sequence = "kope75-00-00062200-00062500" #havn
     #sequence = "kope71-01-00014337-00014547" #good performance
     #sequence = "kope75-00-00037550-00037860" # good performance
-    sequence = "kope75-00-00021500-00022160"
+    sequence = "kope75-00-00021500-00022160" # long, diversity
     
 
     W, H = (1278, 958)
@@ -89,10 +92,11 @@ if dataset == "modd2":
         if os.path.isfile(os.path.join(imu_data_folder, f))
     ]
 
+
 if save_video:
     fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
     out = cv2.VideoWriter(
-        f"{src_dir}/results/video_{dataset}_{mode}_{sequence[:6]+sequence[-4:]}_temporal_smoothing.mp4",
+        f"{src_dir}/results/video_{dataset}_{mode}_{sequence[:6]+sequence[-4:]}_temporal_smoothing_ego_motion_compensation.mp4",
         fourcc,
         10.0,
         (W, H-1),
@@ -108,16 +112,19 @@ if save_polygon_video:
     )
 
 stereo = StereoCam(intrinsics, extrinsics)
-fastsam = FastSAMSeg(model_path=fastsam_model_path)
-rwps3d = RWPS()
-stixels = Stixels()
-temporal_smoothing = TemporalSmoothing()
-
-stereo.plot_BEV_depth_uncertainty()
-
 cam_params = stereo.get_basic_camera_parameters()
 P1 = stereo.get_left_projection_matrix()
 h_fov, v_fov = stereo.get_fov()
+
+KL = stereo.get_camera_matrix(cx=cam_params["cx"], cy=cam_params["cy"], fx=cam_params["fx"], fy=cam_params["fy"])
+fastsam = FastSAMSeg(model_path=fastsam_model_path)
+rwps3d = RWPS()
+stixels = Stixels()
+
+t_imu_to_camera = np.array([0.3, -0.1, -0.7])
+R_imu_to_camera = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+temporal_smoothing = TemporalSmoothing(5, KL, R_imu_to_camera, t_imu_to_camera)
+
 
 config_rwps = f"{src_dir}/rwps_config.json"
 p1 = (102, 22)
@@ -149,7 +156,7 @@ horizon_cutoff = H // 2
 horizon_point0 = np.array([0, horizon_cutoff]).astype(int)
 horizon_pointW = np.array([W, horizon_cutoff]).astype(int)
 
-start_frame = 0
+start_frame = 150
 curr_frame = start_frame
 num_frames = len(image_files)
 horizon_msd_array = []
@@ -183,6 +190,9 @@ while curr_frame < num_frames - 1:
     right_img = cv2.imread(right_image_path)[1:, :]
     imu_data = np.loadtxt(imu_path)
     imu_data_array.append(np.loadtxt(imu_path))
+
+    #print(imu_data)
+    #print(imu_data_array)
 
     gt_path = basepath_gt + image_files[curr_frame][:8] + "L.mat"
     gt_ann = ut.read_mat_file(gt_path)["annotations"]
@@ -325,6 +335,24 @@ while curr_frame < num_frames - 1:
     if use_temporal_smoothing:
         water_mask = temporal_smoothing.get_smoothed_water_mask(water_mask)
 
+    if use_temporal_smoothing_ego_motion_compensation:
+        roll = imu_data[2]
+        pitch = imu_data[1]
+        yaw = imu_data[1]
+        water_mask_raw = water_mask
+        water_mask = temporal_smoothing.get_smoothed_ego_motion_compensated_mask(
+            water_mask_raw, roll, pitch, yaw
+        )
+
+
+        past_N_compensated_masks = temporal_smoothing.get_ego_motion_compensated_masks(
+            roll, pitch, yaw
+        )
+        if visualize_ego_motion_compensation:
+            temporal_smoothing.plot_overlay_compensated_vs_noncompensated(past_N_compensated_masks, water_mask_raw)
+        
+
+
     blue_water_mask = water_mask
 
     nonwater_mask = np.logical_not(water_mask)
@@ -347,11 +375,15 @@ while curr_frame < num_frames - 1:
             thickness=5,
         )
 
+    if create_rectangular_stixels:
+        rectangular_stixel_mask = stixels.create_rectangular_stixels(water_mask, disparity_img)
+        cv2.imshow("Rectangular Stixels", rectangular_stixel_mask.astype(np.uint8) * 255)
+
 
     if create_polygon:    
         stixel_mask, stixel_positions = stixels.get_stixels(water_mask)
         stixel_width = stixels.get_stixel_width(W)
-        stixels_2d_points = ut.calculate_2d_points_from_stixel_positions(stixel_positions, stixel_width, depth_img, cam_params)
+        stixels_2d_points = calculate_2d_points_from_stixel_positions(stixel_positions, stixel_width, depth_img, cam_params)
         stixels_polygon = create_polygon_from_2d_points(stixels_2d_points)
 
         cv2.imshow("Stixels", stixel_mask.astype(np.uint8) * 255)
@@ -412,7 +444,8 @@ while curr_frame < num_frames - 1:
     if save_video:
         out.write(water_img)
     cv2.imshow("Water Segmentation", water_img)
-    # cv2.imshow("Depth", depth_img)
+    cv2.imshow("Depth", depth_img)
+    #cv2.imshow("Left Image", left_img)
     key = cv2.waitKey(10)
 
     if key == 27:  # Press ESC to exit
