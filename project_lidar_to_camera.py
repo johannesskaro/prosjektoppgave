@@ -64,6 +64,9 @@ def merge_lidar_onto_image(image, lidar_points, intensities=None, point_size=2, 
     Returns:
     - image_with_lidar: The image with lidar points overlaid.
     """
+    lidar_points = np.squeeze(lidar_points, axis=1)  # From (N, 1, 2) to (N, 2)
+    if intensities is not None:
+        intensities = np.squeeze(intensities, axis=1)  # From (N, 1) to (N,)
 
     image_with_lidar = image.copy()
     height, width = image.shape[:2]
@@ -96,17 +99,18 @@ def merge_lidar_onto_image(image, lidar_points, intensities=None, point_size=2, 
     colormap = plt.get_cmap('Reds')
 
     # Draw points on the lidar overlay image
-    for i, point in enumerate(np.squeeze(lidar_points, axis=1)):
+    for i, point in enumerate(lidar_points):
         x, y = int(round(point[0])), int(round(point[1]))
         if 0 <= x < width and 0 <= y < height:
             value_norm = intensities_normalized[i]
             color = colormap(value_norm)[:3]  # returns RGBA, take RGB
             color = tuple(int(c * 255) for c in color[::-1])  # convert to BGR
+            color = (0, 0, 255)
             cv2.circle(lidar_overlay, (x, y), point_size, color, -1)
 
     # Blend the original image and the lidar overlay
-    alpha = 1.0  # Weight of the original image
-    beta = 1.0   # Weight of the overlay
+    alpha = 1  # Weight of the original image
+    beta = 1   # Weight of the overlay
     gamma = 0.0  # Scalar added to each sum
     image_with_lidar = cv2.addWeighted(image_with_lidar, alpha, lidar_overlay, beta, gamma)
 

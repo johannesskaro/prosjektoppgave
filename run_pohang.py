@@ -184,7 +184,7 @@ while curr_frame < num_frames - 1:
     ### COMMON
     (H, W, D) = left_img.shape
 
-        # Run RWPS segmentation
+    # Run RWPS segmentation
     rwps_mask_3d, plane_params_3d, rwps_succeeded = rwps3d.segment_water_plane_using_point_cloud(
         left_img.astype(np.uint8), depth_img
     )

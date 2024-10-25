@@ -34,8 +34,9 @@ use_temporal_smoothing = False
 mode = "fusion" #"rwps"
 iou_threshold = 0.1
 fastsam_model_path = "weights/FastSAM-x.pt"
-device = "mps"
-dataset_dir = "/Users/johannesskaro/Documents/KYB 5.år/Datasets"
+device = "cuda" #"mps"
+#dataset_dir = "/Users/johannesskaro/Documents/KYB 5.år/Datasets"
+dataset_dir = "C:\Users\johro\Documents\BB-Perception\Datasets"
 onedrive_dir = "/Users/johannesskaro/OneDrive - NTNU/summer-2023"
 src_dir = "/Users/johannesskaro/Documents/KYB 5.år/fusedWSS"
 

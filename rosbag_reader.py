@@ -19,9 +19,10 @@ class RosbagData:
 typestore = get_typestore(Stores.ROS2_FOXY)
 
 # rosbag config
-ROSBAG_FOLDER = '/Users/johannesskaro/Documents/KYB 5.år/Datasets/ma2'
+#ROSBAG_FOLDER = '/Users/johannesskaro/Documents/KYB 5.år/Datasets/ma2'
+ROSBAG_FOLDER = r"C:\Users\johro\Documents\BB-Perception\Datasets\ma2"
 #r'C:\Users\aflaptop\Documents\wesenberg-semester_project\2023-07-11_Multi_ZED_Summer\MA2'
-ROSBAG_NAME = 'scen5'
+ROSBAG_NAME = 'scen4_2'
 START_TIMESTAMP = 1689070888.907352002
 
 # topic configs
@@ -124,6 +125,10 @@ def visualize_dataset(imgs: list[str, np.ndarray], inspect_mode=False):
     # CAMERA
     while i_frame < num_imgs:
         msg_timestamp,image = imgs[i_frame]
+        
+
+        image = np.array(image)
+        print(f"Image type: {type(image)}, Image shape: {image.shape if isinstance(image, np.ndarray) else 'N/A'}")
         image = cv2.demosaicing(image, cv2.COLOR_BAYER_BG2BGR)
 
         cv2.imshow(ROSBAG_NAME, image)
@@ -146,7 +151,7 @@ def visualize_dataset(imgs: list[str, np.ndarray], inspect_mode=False):
 
 
 if __name__ == "__main__":
-    bag_path = Path(ROSBAG_FOLDER+"/"+ROSBAG_NAME)
+    bag_path = Path(ROSBAG_FOLDER+"\\"+ROSBAG_NAME)
 
     rosbag_data = read_rosbag(bag_path)
 

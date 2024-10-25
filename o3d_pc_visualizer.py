@@ -2,7 +2,7 @@ import open3d as o3d
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-#from line_mesh import LineMesh
+from line_mesh import LineMesh
 
 class MyCoordFrame():
     def __init__(self) -> None:

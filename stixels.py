@@ -2,13 +2,14 @@ import numpy as np
 from shapely.geometry import Polygon
 from collections import deque
 import utilities as ut
+import cv2
 
 class Stixels:
 
     N = 10
     stixel_2d_points_N_frames = deque(maxlen=N)
 
-    def __init__(self, num_of_stixels = 30) -> None:
+    def __init__(self, num_of_stixels = 48) -> None:
         self.num_stixels = num_of_stixels # 958//47 #gir 20I wan 
 
     def get_stixel_2d_points_N_frames(self) -> np.array:
@@ -84,27 +85,67 @@ class Stixels:
         free_space_boundary, _ = self.get_free_space_boundary(water_mask)
         stixel_width = self.get_stixel_width(water_mask.shape[1])
         #_, stixel_positions = self.get_stixels_base(water_mask)
-        std_dev_threshold = 1
+        std_dev_threshold = 0.4
 
         rectangular_stixel_mask = np.zeros_like(water_mask)
+        rectangular_stixel_list = []
 
         for n in range(self.num_stixels):
             stixel_base = free_space_boundary[n * stixel_width:(n + 1) * stixel_width]
-            stixel_base_height = int(np.mean(stixel_base))
+            stixel_base_height = int(np.median(stixel_base))
             stixel_top_height = water_mask.shape[0]
             std_dev = 0
-            median_disp_list = []
+            median_row_disp_list = []
             for v in range(stixel_base_height, 0, -1):
-                median_disp = np.median(disparity_map[v, n * stixel_width:(n + 1) * stixel_width])
-                median_disp_list.append(median_disp)
-                std_dev = np.std(median_disp_list)
+                median_row_disp = np.median(disparity_map[v, n * stixel_width:(n + 1) * stixel_width])
+                median_row_disp_list.append(median_row_disp)
+                std_dev = np.std(median_row_disp_list)
                 #print(f"std_dev: {std_dev}")
                 if std_dev > std_dev_threshold:
                     stixel_top_height = v
                     break
+            stixel_median_disp = np.median(disparity_map[stixel_top_height:stixel_base_height, n * stixel_width:(n + 1) * stixel_width])
+            stixel = [stixel_top_height, stixel_base_height, stixel_median_disp]
+            rectangular_stixel_list.append(stixel)
             rectangular_stixel_mask[stixel_top_height:stixel_base_height, n * stixel_width:(n + 1) * stixel_width] = 1
 
-        return rectangular_stixel_mask
+        return rectangular_stixel_mask, rectangular_stixel_list
+    
+    def merge_stixels_onto_image(self, stixel_list, image):
+
+        overlay = np.zeros_like(image)
+        stixel_width = self.get_stixel_width(image.shape[1])
+        disp_values = [stixel[2] for stixel in stixel_list]
+        min_disp = 0 #np.min(disp_values)
+        max_disp = 10 #np.max(disp_values)
+        
+
+        for n, stixel in enumerate(stixel_list):
+            stixel_top = stixel[0]
+            stixel_base = stixel[1]
+            stixel_disp = stixel[2]
+            if stixel_base > stixel_top and stixel_width > 0:
+
+                #normalized_disp = np.uint8(255 * (stixel_disp - min_disp) / (max_disp - min_disp))
+                #normalized_disp_array = np.full((stixel_base - stixel_top, stixel_width), normalized_disp, dtype=np.uint8)
+                #colored_stixel = cv2.applyColorMap(normalized_disp_array, cv2.COLORMAP_JET)
+                green_stixel = np.full((stixel_base - stixel_top, stixel_width, 3), (0, 50, 0), dtype=np.uint8)
+
+                overlay[stixel_top:stixel_base, n * stixel_width:(n + 1) * stixel_width] = green_stixel
+
+                # Add a border (rectangle) around the stixel
+                cv2.rectangle(overlay, 
+                        (n * stixel_width, stixel_top),  # Top-left corner
+                        ((n + 1) * stixel_width, stixel_base),  # Bottom-right corner
+                        (0,0,0),  # Color of the border (BGR)
+                        2)  # Thickness of the border
+
+        alpha = 0.8  # Weight of the original image
+        beta = 1  # Weight of the overlay
+        gamma = 0.0  # Scalar added to each sum
+
+        blended_image = cv2.addWeighted(image, alpha, overlay, beta, gamma)
+        return blended_image
 
     
 def create_polygon_from_2d_points(points: list) -> Polygon:
