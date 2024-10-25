@@ -39,7 +39,8 @@ TRANS_FLOOR_TO_LIDAR = np.array([-4.1091, -1.1602, -1.015 ])
 ROT_FLOOR_TO_CAM = np.array([[-3.20510335e-09, -3.20510335e-09, -1.00000000e+00],
        [-1.00000000e+00, -5.55111512e-17,  3.20510335e-09],
        [-5.55111512e-17,  1.00000000e+00, -3.20510335e-09]])
-TRANS_FLOOR_TO_CAM = np.array([-4.05,  0.9, -1.1 ])
+#TRANS_FLOOR_TO_CAM = np.array([-4.05,  0.9, -1.1 ])
+TRANS_FLOOR_TO_CAM = np.array([-4.1358,  1.0967, -0.702 ])
 
 LIDAR_TOPIC = "/lidar_aft/points"
 K = np.loadtxt(f"scen6_calibration/K_matrix.txt")
