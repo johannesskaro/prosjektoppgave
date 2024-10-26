@@ -64,7 +64,7 @@ def merge_lidar_onto_image(image, lidar_points, intensities=None, point_size=2, 
     Returns:
     - image_with_lidar: The image with lidar points overlaid.
     """
-    lidar_points = np.squeeze(lidar_points, axis=1)  # From (N, 1, 2) to (N, 2)
+
     if intensities is not None:
         intensities = np.squeeze(intensities, axis=1)  # From (N, 1) to (N,)
 

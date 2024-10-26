@@ -19,9 +19,7 @@ class Stixels:
         self.stixel_2d_points_N_frames.append(stixel_2d_points)
 
     def get_stixel_width(self, img_width) -> int:
-    
         stixel_width = int(img_width // self.num_stixels)
-
         return stixel_width
 
     def get_free_space_boundary(self, water_mask: np.array) -> np.array:
@@ -38,7 +36,8 @@ class Stixels:
         height, width = water_mask.shape
 
         free_space_boundary_mask = np.zeros_like(water_mask)
-        free_space_boundary = np.zeros(width)
+        #free_space_boundary = np.zeros(width)
+        free_space_boundary = np.ones(width) * height
 
         for j in range(width):
             for i in reversed(range(height-50)):
@@ -111,6 +110,38 @@ class Stixels:
 
         return rectangular_stixel_mask, rectangular_stixel_list
     
+    def filter_lidar_points_by_stixels(self, lidar_points, stixel_list, stixel_width):
+        filtered_points = []
+        stixel_indices = []
+
+        for n, stixel in enumerate(stixel_list):
+            top_height = stixel[0]
+            base_height = stixel[1]
+            left_bound = n * stixel_width
+            right_bound = (n + 1) * stixel_width
+
+            # Check if points fall within this stixel's bounds (horizontal and vertical in pixel coordinates)
+            mask = (
+                (lidar_points[:, 1] >= top_height) &
+                (lidar_points[:, 1] <= base_height) &
+                (lidar_points[:, 0] >= left_bound) &
+                (lidar_points[:, 0] <= right_bound)
+            )
+
+            # Filter points and record the stixel index
+            stixel_points = lidar_points[mask]
+
+            filtered_points.extend(stixel_points)
+            stixel_indices.extend([n] * len(stixel_points))
+
+
+        filtered_points = np.array(filtered_points)
+        stixel_indices = np.array(stixel_indices)
+
+        return filtered_points, stixel_indices
+    
+        
+    
     def merge_stixels_onto_image(self, stixel_list, image):
 
         overlay = np.zeros_like(image)
@@ -124,6 +155,7 @@ class Stixels:
             stixel_top = stixel[0]
             stixel_base = stixel[1]
             stixel_disp = stixel[2]
+
             if stixel_base > stixel_top and stixel_width > 0:
 
                 #normalized_disp = np.uint8(255 * (stixel_disp - min_disp) / (max_disp - min_disp))
@@ -146,6 +178,7 @@ class Stixels:
 
         blended_image = cv2.addWeighted(image, alpha, overlay, beta, gamma)
         return blended_image
+        
 
     
 def create_polygon_from_2d_points(points: list) -> Polygon:

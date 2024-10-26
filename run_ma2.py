@@ -17,7 +17,7 @@ import geopandas as gpd
 
 #matplotlib.use('Agg')
 
-save_video = True
+save_video = False
 show_horizon = False
 create_bev = False
 save_bev = False
@@ -39,18 +39,13 @@ src_dir = r"C:\Users\johro\Documents\BB-Perception\prosjektoppgave"
 
 W, H = (1920, 1080)
 FPS = 15.0
-K = np.loadtxt(f"scen6_calibration/K_matrix.txt")
-R = np.loadtxt(f"scen6_calibration/R_matrix.txt")
-T = np.loadtxt(f"scen6_calibration/T_matrix.txt")
-focal_length = K[0,0]
-baseline = np.linalg.norm(T)
 
 plt.ion()
 
 if save_video:
     fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
     out = cv2.VideoWriter(
-        f"{src_dir}/results/video_{dataset}_{mode}_{sequence}_stixels_lidar.mp4",
+        f"{src_dir}/results/video_{dataset}_{mode}_{sequence}_stixels_lidar_updated_trans.mp4",
         fourcc,
         FPS,
         (W, H),
@@ -90,7 +85,7 @@ def main():
     gen_svo = gen_svo_images()
 
     next_ma2_timestamp, next_ma2_lidar_points, intensity = next(gen_lidar)
-    next_svo_timestamp, next_svo_image, disparity_img = next(gen_svo)
+    next_svo_timestamp, next_svo_image, disparity_img, depth_img = next(gen_svo)
     current_timestamp = 0
 
     iterating = True
@@ -110,7 +105,7 @@ def main():
                 #print("SVO")
                 #cv2.imshow("SVO image", next_svo_image)
                 try:
-                    next_svo_timestamp, next_svo_image, disparity_img = next(gen_svo)
+                    next_svo_timestamp, next_svo_image, disparity_img, depth_img = next(gen_svo)
                     current_timestamp = next_svo_timestamp
                 except StopIteration:
                     iterating = False
@@ -129,7 +124,7 @@ def main():
             #print("SVO")
             #cv2.imshow("SVO image", next_svo_image)
             try:
-                next_svo_timestamp, next_svo_image, disparity_img = next(gen_svo)
+                next_svo_timestamp, next_svo_image, disparity_img, depth_img = next(gen_svo)
                 current_timestamp = next_svo_timestamp
             except StopIteration:
                 iterating = False
@@ -141,7 +136,7 @@ def main():
         #print(f"Current timestamp: {current_timestamp}")
 
         left_img = next_svo_image
-        depth_img = baseline * focal_length / disparity_img
+        lidar_points = np.squeeze(next_ma2_lidar_points, axis=1)  # From (N, 1, 2) to (N, 2)
 
         (H, W, D) = left_img.shape
 
@@ -255,6 +250,10 @@ def main():
         if create_rectangular_stixels:
             rectangular_stixel_mask, rec_stixel_list = stixels.create_rectangular_stixels(water_mask, disparity_img)
             #cv2.imshow("Rectangular Stixels", rectangular_stixel_mask.astype(np.uint8) * 255)
+            stixel_width = stixels.get_stixel_width(W)
+            filtered_lidar_points, lidar_stixel_indices = stixels.filter_lidar_points_by_stixels(lidar_points, rec_stixel_list, stixel_width)
+            print(f"Shape of filtered lidar points: {filtered_lidar_points.shape}")
+            print(f"Shape of lidar stixel indices: {lidar_stixel_indices.shape}")
 
 
         if create_polygon:    
@@ -291,18 +290,17 @@ def main():
             out_polygon.write(polygon_BEV_image_resized_bgr)
 
 
-        #image_with_lidar = merge_lidar_onto_image(water_img, next_ma2_lidar_points)
-        #image_with_lidar_and_stixels = stixels.merge_stixels_onto_image(rec_stixel_list, image_with_lidar)
-        #cv2.imshow("Stixel image", image_with_lidar_and_stixels)
         image_with_stixels = stixels.merge_stixels_onto_image(rec_stixel_list, water_img)
-        image_with_stixels_and_lidar = merge_lidar_onto_image(image_with_stixels, next_ma2_lidar_points)
-        cv2.imshow("Stixel image", image_with_stixels_and_lidar)
-        #cv2.imshow("Disparity image", depth_img.astype(np.uint8))
+        image_with_stixels_and_filtered_lidar = merge_lidar_onto_image(image_with_stixels, filtered_lidar_points)
+        #image_with_stixels_and_lidar = merge_lidar_onto_image(image_with_stixels, lidar_points)
+        #cv2.imshow("Stixel image with lidar", image_with_stixels_and_lidar)
+        cv2.imshow("Stixel image", image_with_stixels_and_filtered_lidar)
+        cv2.imshow("Depth image", depth_img.astype(np.uint8))
         #cv2.imshow("Water Segmentation", water_img)
 
         if save_video:
             #out.write(water_img)
-            out.write(image_with_stixels_and_lidar)
+            out.write(image_with_stixels_and_filtered_lidar)
 
         key = cv2.waitKey(10)
 
