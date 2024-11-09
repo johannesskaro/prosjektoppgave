@@ -14,6 +14,11 @@ from project_lidar_to_camera import merge_lidar_onto_image
 import utilities as ut
 from shapely.geometry import Polygon
 import geopandas as gpd
+import matplotlib
+from temporal_smoothing import TemporalSmoothing
+import json
+from run_3d_viz import plot_scene, animate
+import os
 
 #matplotlib.use('Agg')
 
@@ -23,15 +28,17 @@ create_bev = False
 save_bev = False
 create_polygon = False
 plot_polygon = False
-save_polygon_video = False
+save_polygon_video = True
 create_rectangular_stixels = True
-use_temporal_smoothing = False
+use_temporal_smoothing = True
 use_temporal_smoothing_ego_motion_compensation = False
 visualize_ego_motion_compensation = False
+save_3d_stixels = False
+save_3d_visualization_video = True
 
 dataset = "ma2"
-sequence = "scen5"
-mode = "fusion" #"fastsam" #"rwps"
+sequence = "scen4_2"
+mode = "fastsam" #"fastsam" #"rwps" #"fusion"
 iou_threshold = 0.1
 fastsam_model_path = "weights/FastSAM-x.pt"
 device = "cuda"
@@ -45,7 +52,7 @@ plt.ion()
 if save_video:
     fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
     out = cv2.VideoWriter(
-        f"{src_dir}/results/video_{dataset}_{mode}_{sequence}_stixels_lidar_updated_trans.mp4",
+        f"{src_dir}/results/video_{dataset}_{mode}_{sequence}_right_zed.mp4",
         fourcc,
         FPS,
         (W, H),
@@ -54,15 +61,25 @@ if save_video:
 if save_polygon_video:
     fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
     out_polygon = cv2.VideoWriter(
-        f"{src_dir}/results/video_{dataset}_polygon_SVO.mp4",
+        f"{src_dir}/results/video_{dataset}_{mode}_{sequence}_polygon_BEV.mp4",
         fourcc,
         FPS,
         (H, H),
     )
 
+if save_3d_visualization_video:
+    fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
+    out_3d_visualization = cv2.VideoWriter(
+        f"{src_dir}/results/video_{dataset}_{mode}_{sequence}_3d_visualization_v3.mp4",
+        fourcc,
+        FPS,
+        (1280, 720),
+    )
+
 fastsam = FastSAMSeg(model_path=fastsam_model_path)
 rwps3d = RWPS()
 stixels = Stixels()
+temporal_smoothing = TemporalSmoothing(5, K)
  
 cam_params = {"cx": K[0,2], "cy": K[1,2], "fx": K[0,0], "fy":K[1,1], "b": baseline}
 P1 = K @ np.hstack((np.eye(3), np.zeros((3, 1))))
@@ -84,18 +101,19 @@ def main():
     gen_lidar = gen_ma2_lidar_points()
     gen_svo = gen_svo_images()
 
-    next_ma2_timestamp, next_ma2_lidar_points, intensity = next(gen_lidar)
+    next_ma2_timestamp, next_ma2_lidar_points, intensity, xyz_c = next(gen_lidar)
     next_svo_timestamp, next_svo_image, disparity_img, depth_img = next(gen_svo)
     current_timestamp = 0
 
     iterating = True
+    curr_frame = 0
 
     while iterating:
         if next_ma2_timestamp is not None and next_svo_timestamp is not None:
             if next_ma2_timestamp < next_svo_timestamp:
                 #print("Lidar")
                 try:
-                    next_ma2_timestamp, next_ma2_lidar_points, intensity = next(gen_lidar)
+                    next_ma2_timestamp, next_ma2_lidar_points, intensity, xyz_c = next(gen_lidar)
                     current_timestamp = next_ma2_timestamp
                 except StopIteration:
                     iterating = False
@@ -114,7 +132,7 @@ def main():
         elif next_ma2_timestamp is not None:
             #print("Lidar")
             try:
-                next_ma2_timestamp, next_ma2_lidar_points, intensity = next(gen_lidar)
+                next_ma2_timestamp, next_ma2_lidar_points, intensity, xyz_c = next(gen_lidar)
                 current_timestamp = next_ma2_timestamp
             except StopIteration:
                 iterating = False
@@ -134,9 +152,11 @@ def main():
             break
         
         #print(f"Current timestamp: {current_timestamp}")
+        curr_frame += 1
 
         left_img = next_svo_image
-        lidar_points = np.squeeze(next_ma2_lidar_points, axis=1)  # From (N, 1, 2) to (N, 2)
+        lidar_image_points = np.squeeze(next_ma2_lidar_points, axis=1)  # From (N, 1, 2) to (N, 2)
+        lidar_3d_points = xyz_c
 
         (H, W, D) = left_img.shape
 
@@ -150,8 +170,10 @@ def main():
 
         # FastSAM classifier
         if mode == "fastsam":
-            left_image_kept = left_img.copy()[horizon_cutoff:, :]
-            rwps_mask_3d = rwps_mask_3d[horizon_cutoff:, :]
+            #left_image_kept = left_img.copy()[horizon_cutoff:, :]
+            #rwps_mask_3d = rwps_mask_3d[horizon_cutoff:, :]
+
+            left_image_kept = left_img.copy()
 
             water_mask = fastsam.get_mask_at_points(
                 left_image_kept,
@@ -161,9 +183,9 @@ def main():
             ).astype(int)
             water_mask = water_mask.reshape(rwps_mask_3d.shape)
 
-            water_mask2 = np.zeros((H, W), dtype=np.uint8)
-            water_mask2[horizon_cutoff:] = water_mask
-            water_mask = water_mask2
+            #water_mask2 = np.zeros((H, W), dtype=np.uint8)
+            #water_mask2[horizon_cutoff:] = water_mask
+            #water_mask = water_mask2
 
         # Run FastSAM segmentation
         elif mode == "fusion":
@@ -171,8 +193,10 @@ def main():
             if rwps_succeded == False:
                 #Use fastsam
                 print("RWPS failed, using FastSAM")
-                left_image_kept = left_img.copy()[horizon_cutoff:, :]
-                rwps_mask_3d = rwps_mask_3d[horizon_cutoff:, :]
+                #left_image_kept = left_img.copy()[horizon_cutoff:, :]
+                #rwps_mask_3d = rwps_mask_3d[horizon_cutoff:, :]
+
+                left_image_kept = left_img.copy()
 
                 water_mask = fastsam.get_mask_at_points(
                     left_image_kept,
@@ -182,9 +206,9 @@ def main():
                 ).astype(int)
                 water_mask = water_mask.reshape(rwps_mask_3d.shape)
 
-                water_mask2 = np.zeros((H, W), dtype=np.uint8)
-                water_mask2[horizon_cutoff:] = water_mask
-                water_mask = water_mask2
+                #water_mask2 = np.zeros((H, W), dtype=np.uint8)
+                #water_mask2[horizon_cutoff:] = water_mask
+                #water_mask = water_mask2
 
             else:
                 print("RWPS succeeded, using fusion")
@@ -233,6 +257,9 @@ def main():
         else:
             water_mask = rwps_mask_3d
             distractions_mask = np.zeros_like(water_mask)
+
+        if use_temporal_smoothing:
+            water_mask = temporal_smoothing.get_smoothed_water_mask(water_mask)
         
         blue_water_mask = water_mask
 
@@ -241,25 +268,31 @@ def main():
         #nonwater_contrastreduced[nonwater_mask] = (
         #    nonwater_contrastreduced[nonwater_mask] // 2
         #) + 128
-
+        blue_color = [255, 100, 0] 
+        pink_color = [255, 0, 255]
         water_img = nonwater_contrastreduced.copy()
         water_img = ut.blend_image_with_mask(
-            water_img, blue_water_mask, [255, 100, 0], alpha1=1, alpha2=0.5
+            water_img, blue_water_mask, pink_color, alpha1=1, alpha2=0.5
         )
 
         if create_rectangular_stixels:
-            rectangular_stixel_mask, rec_stixel_list = stixels.create_rectangular_stixels(water_mask, disparity_img)
+            rec_stixel_list = stixels.create_rectangular_stixels(water_mask, disparity_img, depth_img)
             #cv2.imshow("Rectangular Stixels", rectangular_stixel_mask.astype(np.uint8) * 255)
-            stixel_width = stixels.get_stixel_width(W)
-            filtered_lidar_points, lidar_stixel_indices = stixels.filter_lidar_points_by_stixels(lidar_points, rec_stixel_list, stixel_width)
-            print(f"Shape of filtered lidar points: {filtered_lidar_points.shape}")
-            print(f"Shape of lidar stixel indices: {lidar_stixel_indices.shape}")
+
+            stixel_mask, stixel_positions = stixels.get_stixels_base(water_mask)
+
+            filtered_lidar_points, filtered_lidar_3d_points, lidar_stixel_indices = stixels.filter_lidar_points_by_stixels(lidar_image_points, lidar_3d_points)
+            lidar_stixel_depths = stixels.get_stixel_depth_from_lidar_points(filtered_lidar_3d_points, lidar_stixel_indices)
+            stixels_2d_points = stixels.get_polygon_points_from_lidar_and_stereo_depth(lidar_stixel_depths, stixel_positions, cam_params)
+            stixels_polygon = create_polygon_from_2d_points(stixels_2d_points)
+            stixels_3d_points = stixels.get_stixel_3d_points(cam_params)
+
 
 
         if create_polygon:    
             stixel_mask, stixel_positions = stixels.get_stixels_base(water_mask)
             stixel_width = stixels.get_stixel_width(W)
-            stixels_2d_points = calculate_2d_points_from_stixel_positions(stixel_positions, stixel_width, depth_img, cam_params)
+            stixels_2d_points = stixels.calculate_2d_points_from_stixel_positions(stixel_positions, stixel_width, depth_img, cam_params)
             stixels_polygon = create_polygon_from_2d_points(stixels_2d_points)
 
             cv2.imshow("Stixels", stixel_mask.astype(np.uint8) * 255)
@@ -277,6 +310,8 @@ def main():
             myPoly = gpd.GeoSeries([stixels_polygon])
             dpi = 100
             fig, ax = plt.subplots(figsize=((H) / dpi, (H ) / dpi), dpi=dpi)
+            ax.set_xlim(-30, 30)
+            ax.set_ylim(0, 60)
             myPoly.plot(ax=ax)
             fig.canvas.draw()
             # Convert the plot to a numpy array (RGB image)
@@ -289,14 +324,47 @@ def main():
             polygon_BEV_image_resized_bgr = cv2.cvtColor(polygon_BEV_image_resized, cv2.COLOR_RGB2BGR)
             out_polygon.write(polygon_BEV_image_resized_bgr)
 
+        if save_3d_stixels:
+            data = {
+                "stixels": stixels_3d_points.tolist(),
+                "plane_params": plane_params_3d.tolist(),
+                "water_surface_polygon_points": stixels_2d_points.tolist(),
+            }
+            with open(f"files/temp.json", "w") as f:
+                json.dump(data, f)
+            os.replace("files/temp.json", "files/stixel.json")
+
+        if save_3d_visualization_video:
+            dpi = 100
+            fig = plt.figure(figsize=(1280/dpi, 720/dpi), dpi=dpi)
+            ax = fig.add_subplot(111, projection='3d')
+            ax.set_proj_type('persp', focal_length=0.2) 
+            azim = 0 + 3 * np.sin(np.radians(curr_frame * 2))  # Azimuth changes within a 10-15 degree range
+            elev = 20 + 10 * np.sin(np.radians(curr_frame * 1))  # Elevation changes within a 13-17 degree range
+            camera_position = (elev, azim)
+            plot_scene(ax, stixels_3d_points.tolist(), stixels_2d_points, plane_params_3d, camera_position)
+                
+            # Save current frame to a file
+            fig.canvas.draw()
+            img = np.frombuffer(fig.canvas.buffer_rgba(), dtype='uint8').reshape(fig.canvas.get_width_height()[::-1] + (4,))
+            plt.close(fig)
+            img = img[:, :, :3]
+
+            img = cv2.resize(img, (1280, 720))
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR for OpenCV
+            out_3d_visualization.write(img)
+            
+
 
         image_with_stixels = stixels.merge_stixels_onto_image(rec_stixel_list, water_img)
         image_with_stixels_and_filtered_lidar = merge_lidar_onto_image(image_with_stixels, filtered_lidar_points)
-        #image_with_stixels_and_lidar = merge_lidar_onto_image(image_with_stixels, lidar_points)
+        #image_with_stixels_and_lidar = merge_lidar_onto_image(image_with_stixels, lidar_image_points)
+
         #cv2.imshow("Stixel image with lidar", image_with_stixels_and_lidar)
         cv2.imshow("Stixel image", image_with_stixels_and_filtered_lidar)
-        cv2.imshow("Depth image", depth_img.astype(np.uint8))
+        #cv2.imshow("Depth image", depth_img)
         #cv2.imshow("Water Segmentation", water_img)
+        #cv2.imshow("Left image", left_img)
 
         if save_video:
             #out.write(water_img)
@@ -307,13 +375,15 @@ def main():
         if key == 27:  # Press ESC to exit
             break
         if key in [106]:  # j
-            curr_frame += 50
-        elif key in [98]:  # b
-            curr_frame -= 50
-        elif key in [107]:  # k
-            curr_frame += 200
-        elif key in [110]:  # n
-            curr_frame -= 200
+            data = {
+                "stixels": stixels_3d_points.tolist(),
+                "plane_params": plane_params_3d.tolist(),
+                "water_surface_polygon_points": stixels_2d_points.tolist(),
+            }
+            with open(f"files/temp.json", "w") as f:
+                json.dump(data, f)
+            os.replace("files/temp.json", "files/stixel.json")
+            print("Saved stixels")
 
         cv2.waitKey(10)
 
@@ -322,6 +392,8 @@ def main():
         out.release()
     if save_polygon_video:
         out_polygon.release()
+    if save_3d_visualization_video:
+        out_3d_visualization.release()
 
 
 if __name__ == "__main__":

@@ -6,11 +6,11 @@ from scipy.spatial.transform import Rotation as R
 
 class TemporalSmoothing:
 
-    def __init__(self, N, camera_matrix, R_imu_to_camera, t_imu_to_camera) -> None:
+    def __init__(self, N, camera_matrix, R_imu_to_camera=None, t_imu_to_camera=None) -> None:
         self.N = N  # Number of past frames to consider
         self.camera_matrix = camera_matrix  # Camera intrinsic matrix
-        self.R_imu_to_camera = R_imu_to_camera  # Rotation from IMU to camera frame
-        self.t_imu_to_camera = t_imu_to_camera.reshape((3, 1))  # Translation from IMU to camera fr
+        #self.R_imu_to_camera = R_imu_to_camera  # Rotation from IMU to camera frame
+        #self.t_imu_to_camera = t_imu_to_camera.reshape((3, 1))  # Translation from IMU to camera fr
         
         #self.past_N_masks = deque(maxlen=N)
         #self.past_N_orientations = deque(maxlen=N)
@@ -41,7 +41,7 @@ class TemporalSmoothing:
 
         smoothed_water_mask = np.logical_or(water_mask, thresholded_mask).astype(int)
 
-        self.past_N_masks.append(water_mask)
+        self.add_mask(water_mask)
 
         return smoothed_water_mask
 
