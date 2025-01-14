@@ -35,7 +35,7 @@ class Stixels:
         for j in range(width):
             for i in reversed(range(height-50)):
                 if water_mask[i, j] == 0:
-                    free_space_boundary_mask[i, j] = 1
+                    free_space_boundary_mask[i:i, j] = 1
                     free_space_boundary[j] = i
                     break
 
@@ -116,8 +116,9 @@ class Stixels:
             stixel_median_depth = np.nanmedian(depth_map[stixel_top_height:stixel_base_height, stixel_range])
             stixel = [stixel_top_height, stixel_base_height, stixel_median_disp, stixel_median_depth]
             self.rectangular_stixel_list.append(stixel)
+            rectangular_stixel_mask[stixel_top_height:stixel_base_height, stixel_range] = 1
 
-        return self.rectangular_stixel_list
+        return self.rectangular_stixel_list, rectangular_stixel_mask
     
     def get_stixel_3d_points(self, camera_params):
         stixel_list = self.rectangular_stixel_list
@@ -296,7 +297,7 @@ class Stixels:
                 #normalized_disp = np.uint8(255 * (stixel_disp - min_disp) / (max_disp - min_disp))
                 #normalized_disp_array = np.full((stixel_base - stixel_top, stixel_width), normalized_disp, dtype=np.uint8)
                 #colored_stixel = cv2.applyColorMap(normalized_disp_array, cv2.COLORMAP_JET)
-                green_stixel = np.full((stixel_base - stixel_top, stixel_width, 3), (0, 50, 0), dtype=np.uint8)
+                green_stixel = np.full((stixel_base - stixel_top, stixel_width, 3), (0, 80, 0), dtype=np.uint8) #(0, 50, 0)
 
                 overlay[stixel_top:stixel_base, n * stixel_width:(n + 1) * stixel_width] = green_stixel
 

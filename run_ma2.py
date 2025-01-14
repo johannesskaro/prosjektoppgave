@@ -19,6 +19,7 @@ from temporal_smoothing import TemporalSmoothing
 import json
 from run_3d_viz import plot_scene, animate
 import os
+from plotting import *
 
 #matplotlib.use('Agg')
 
@@ -28,17 +29,17 @@ create_bev = False
 save_bev = False
 create_polygon = False
 plot_polygon = False
-save_polygon_video = True
+save_polygon_video = False
 create_rectangular_stixels = True
 use_temporal_smoothing = True
 use_temporal_smoothing_ego_motion_compensation = False
 visualize_ego_motion_compensation = False
 save_3d_stixels = False
-save_3d_visualization_video = True
+save_3d_visualization_video = False
 
 dataset = "ma2"
-sequence = "scen4_2"
-mode = "fastsam" #"fastsam" #"rwps" #"fusion"
+sequence = "scen6"
+mode = "fusion" #"fastsam" #"rwps" #"fusion"
 iou_threshold = 0.1
 fastsam_model_path = "weights/FastSAM-x.pt"
 device = "cuda"
@@ -52,7 +53,7 @@ plt.ion()
 if save_video:
     fourcc = cv2.VideoWriter_fourcc(*"MP4V")  # You can also use 'MP4V' for .mp4 format
     out = cv2.VideoWriter(
-        f"{src_dir}/results/video_{dataset}_{mode}_{sequence}_right_zed.mp4",
+        f"{src_dir}/results/video_{dataset}_{mode}_{sequence}_only_stixels.mp4",
         fourcc,
         FPS,
         (W, H),
@@ -151,7 +152,7 @@ def main():
         else:
             break
         
-        #print(f"Current timestamp: {current_timestamp}")
+        print(f"Current timestamp: {current_timestamp}")
         curr_frame += 1
 
         left_img = next_svo_image
@@ -265,9 +266,11 @@ def main():
 
         nonwater_mask = np.logical_not(water_mask)
         nonwater_contrastreduced = left_img.copy()
-        #nonwater_contrastreduced[nonwater_mask] = (
-        #    nonwater_contrastreduced[nonwater_mask] // 2
-        #) + 128
+        nonwater_contrastreduced[nonwater_mask] = (
+            nonwater_contrastreduced[nonwater_mask] // 2
+        ) + 128
+
+        left_img_contrastreduced = left_img.copy() // 2 + 128
         blue_color = [255, 100, 0] 
         pink_color = [255, 0, 255]
         water_img = nonwater_contrastreduced.copy()
@@ -276,8 +279,9 @@ def main():
         )
 
         if create_rectangular_stixels:
-            rec_stixel_list = stixels.create_rectangular_stixels(water_mask, disparity_img, depth_img)
+            rec_stixel_list, rec_stixel_mask = stixels.create_rectangular_stixels(water_mask, disparity_img, depth_img)
             #cv2.imshow("Rectangular Stixels", rectangular_stixel_mask.astype(np.uint8) * 255)
+            _, free_space_boundary = stixels.get_free_space_boundary(water_mask)
 
             stixel_mask, stixel_positions = stixels.get_stixels_base(water_mask)
 
@@ -354,21 +358,51 @@ def main():
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR for OpenCV
             out_3d_visualization.write(img)
             
+ 
 
 
-        image_with_stixels = stixels.merge_stixels_onto_image(rec_stixel_list, water_img)
+        image_with_stixels = stixels.merge_stixels_onto_image(rec_stixel_list, left_img)
+        #image_with_stixels_2 = stixels.merge_stixels_onto_image(rec_stixel_list, left_img_contrastreduced)
         image_with_stixels_and_filtered_lidar = merge_lidar_onto_image(image_with_stixels, filtered_lidar_points)
-        #image_with_stixels_and_lidar = merge_lidar_onto_image(image_with_stixels, lidar_image_points)
 
-        #cv2.imshow("Stixel image with lidar", image_with_stixels_and_lidar)
-        cv2.imshow("Stixel image", image_with_stixels_and_filtered_lidar)
+        
+
+        #water_img_with_free_space_boundary = ut.blend_image_with_mask(
+        #    image_with_stixels_and_filtered_lidar, free_space_boundary, [0, 255, 255], alpha1=1, alpha2=1
+        #)
+        #cv2.imwrite("files/water_img_with_free_space_boundary.png", water_img_with_free_space_boundary)
+        #cv2.imshow("Water Segmentation", water_img_with_free_space_boundary)
+        #cv2.imwrite("files/water_mask.png", water_mask.astype(np.uint8) * 255)
+        #cv2.imwrite("files/free_space_boundary_mask.png", free_space_boundary.astype(np.uint8) * 255)
+
+        #image_with_stixels_and_free_space_boundary = ut.blend_image_with_mask(
+        #   image_with_stixels_2, free_space_boundary, [0, 255, 255], alpha1=1, alpha2=1
+        #)
+        #plot_disparity_column(disparity_img, rec_stixel_mask, 610)
+        #plot_stixel_img_without_column(image_with_stixels_and_free_space_boundary, rec_stixel_mask, 610)
+
+
+        image_with_lidar = merge_lidar_onto_image(left_img, lidar_image_points)
+
+        cv2.imshow("Left image", left_img)
+        cv2.imwrite("files/left_image_2.png", left_img)
+        #cv2.imshow("Image with lidar", image_with_lidar)
+        #cv2.imwrite("files/image_with_lidar.png", image_with_lidar)
+        #cv2.imshow("Stixel image", image_with_stixels_and_filtered_lidar)
+        #cv2.imwrite("files/stixel_image.png", image_with_stixels_and_filtered_lidar)
+        #cv2.imshow("Water segmentation", water_img_with_free_space_boundary)
         #cv2.imshow("Depth image", depth_img)
-        #cv2.imshow("Water Segmentation", water_img)
         #cv2.imshow("Left image", left_img)
+        #rec_stixel_mask *= 255
+        #cv2.imshow("Stixel mask", rec_stixel_mask.astype(np.uint8))
+
+
+
 
         if save_video:
             #out.write(water_img)
             out.write(image_with_stixels_and_filtered_lidar)
+            #out.write(water_img_with_free_space_boundary)
 
         key = cv2.waitKey(10)
 
