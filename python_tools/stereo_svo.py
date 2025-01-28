@@ -1,11 +1,13 @@
 import os
 import pickle
+import sys
+#sys.path.append(r"C:\Program Files (x86)\ZED SDK\lib")
 import pyzed.sl as sl
 import cv2
 import numpy as np
 
 import sys
-sys.path.insert(0, "/home/nicholas/GitHub/phd-stereo/python_tools")
+sys.path.insert(0, "/home/johannes/Documents/blueboats/prosjektoppgave/python_tools")
 
 # from timer import timer
 
@@ -21,20 +23,23 @@ class SVOCamera:
         cam_input_type.set_from_svo_file(svo_file_path)
         init_params = sl.InitParameters(input_t=cam_input_type, svo_real_time_mode=False)
         init_params.coordinate_units = sl.UNIT.METER
-        init_params.depth_mode = sl.DEPTH_MODE.NEURAL
+        init_params.depth_mode = sl.DEPTH_MODE.NEURAL #sl.DEPTH_MODE.NEURAL
         init_params.depth_minimum_distance = 0
-        init_params.depth_maximum_distance = 100
+        init_params.depth_maximum_distance = 60 # 100
         self.cam =  sl.Camera()
         assert self.cam.open(init_params) == sl.ERROR_CODE.SUCCESS
 
         self.fps = self.cam.get_camera_information().camera_fps
+        #self.cam.get_camera_information().camera_configuration.fps
 
         self.runtime = sl.RuntimeParameters()
         self.runtime.sensing_mode = sl.SENSING_MODE.STANDARD
+        #self.runtime.sensing_mode = sl.RuntimeParameters.enable_fill_mode
         self.left_image = sl.Mat()
         self.right_image = sl.Mat()
         self.point_cloud = sl.Mat()
         self.disparity = sl.Mat()
+        self.depth = sl.Mat()
 
         # Short baseline rectification
         cam_resolution = self.cam.get_camera_information().camera_resolution
@@ -207,6 +212,10 @@ class SVOCamera:
         disp = -disp_negative
         return disp
     
+    def get_depth_image(self):
+        self.cam.retrieve_measure(self.depth, sl.MEASURE.DEPTH)
+        return np.nan_to_num(self.depth.get_data(), nan=0)
+    
     def set_svo_position_timestamp(self, timestamp):
         # self.set_svo_position(0)
         # assert self.grab() == sl.ERROR_CODE.SUCCESS
@@ -272,6 +281,7 @@ class SVOCamera:
         left_image, right_image = self.get_rectified_images()
         disparity = self.calc_disparity_(left_image, right_image, self.stereo_matcher)
         return disparity
+
     
     def get_pc(self):
         left_image, right_image = self.get_rectified_images()

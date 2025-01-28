@@ -43,7 +43,7 @@ mode = "fusion" #"fastsam" #"rwps" #"fusion"
 iou_threshold = 0.1
 fastsam_model_path = "weights/FastSAM-x.pt"
 device = "cuda"
-src_dir = r"C:\Users\johro\Documents\BB-Perception\prosjektoppgave"
+src_dir = "/home/johannes/Documents/blueboats/prosjektoppgave"
 
 W, H = (1920, 1080)
 FPS = 15.0
@@ -85,7 +85,7 @@ temporal_smoothing = TemporalSmoothing(5, K)
 cam_params = {"cx": K[0,2], "cy": K[1,2], "fx": K[0,0], "fy":K[1,1], "b": baseline}
 P1 = K @ np.hstack((np.eye(3), np.zeros((3, 1))))
 
-config_rwps = f"{src_dir}\\rwps_config.json"
+config_rwps = f"{src_dir}/rwps_config.json"
 p1 = (102, 22)
 p2 = (102, 639)
 invalid_depth_mask = rwps3d.set_invalid(p1, p2, shape=(H - 1, W))
@@ -289,7 +289,7 @@ def main():
             lidar_stixel_depths = stixels.get_stixel_depth_from_lidar_points(filtered_lidar_3d_points, lidar_stixel_indices)
             stixels_2d_points = stixels.get_polygon_points_from_lidar_and_stereo_depth(lidar_stixel_depths, stixel_positions, cam_params)
             stixels_polygon = create_polygon_from_2d_points(stixels_2d_points)
-            stixels_3d_points = stixels.get_stixel_3d_points(cam_params)
+            #stixels_3d_points = stixels.get_stixel_3d_points(cam_params)
 
 
 
@@ -339,6 +339,7 @@ def main():
             os.replace("files/temp.json", "files/stixel.json")
 
         if save_3d_visualization_video:
+            stixels_3d_points = stixels.get_stixel_3d_points(cam_params)
             dpi = 100
             fig = plt.figure(figsize=(1280/dpi, 720/dpi), dpi=dpi)
             ax = fig.add_subplot(111, projection='3d')
@@ -382,13 +383,13 @@ def main():
         #plot_stixel_img_without_column(image_with_stixels_and_free_space_boundary, rec_stixel_mask, 610)
 
 
-        image_with_lidar = merge_lidar_onto_image(left_img, lidar_image_points)
+        #image_with_lidar = merge_lidar_onto_image(left_img, lidar_image_points)
 
         cv2.imshow("Left image", left_img)
-        cv2.imwrite("files/left_image_2.png", left_img)
+        
         #cv2.imshow("Image with lidar", image_with_lidar)
         #cv2.imwrite("files/image_with_lidar.png", image_with_lidar)
-        #cv2.imshow("Stixel image", image_with_stixels_and_filtered_lidar)
+        cv2.imshow("Stixel image", image_with_stixels_and_filtered_lidar)
         #cv2.imwrite("files/stixel_image.png", image_with_stixels_and_filtered_lidar)
         #cv2.imshow("Water segmentation", water_img_with_free_space_boundary)
         #cv2.imshow("Depth image", depth_img)
