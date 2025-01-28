@@ -7,7 +7,8 @@ from scipy.spatial.transform import Rotation as R
 import pyzed.sl as sl
 
 import sys
-sys.path.insert(0, r"C:\Users\johro\Documents\BB-Perception\2023-summer-experiment\python_tools")
+#sys.path.insert(0, r"C:\Users\johro\Documents\BB-Perception\2023-summer-experiment\python_tools")
+sys.path.insert(0, "/home/johannes/Documents/blueboats/prosjektoppgave/python_tools")
 from stereo_svo import SVOCamera
 
 #Scen1 - Into tunnel
